@@ -143,6 +143,14 @@ namespace AnimeStudio.FbxInterop
 
         internal void SetJointsNode(ImportedFrame rootFrame, HashSet<string> bonePaths, bool castToBone)
         {
+            var connectedBones = new HashSet<ImportedFrame>();
+            // Unweighted intermediary transforms must remain bones too. Otherwise importers
+            // can split one skin into nested armatures. Keep the selected model root as a container.
+            if (_exportOptions.continuousBoneHierarchy && bonePaths != null)
+                foreach (var candidate in _frameToNode.Keys)
+                    if (bonePaths.Contains(candidate.Path))
+                        for (var ancestor = candidate; ancestor != null && ancestor != rootFrame; ancestor = ancestor.Parent)
+                            connectedBones.Add(ancestor);
             var frameStack = new Stack<ImportedFrame>();
 
             frameStack.Push(rootFrame);
@@ -155,7 +163,14 @@ namespace AnimeStudio.FbxInterop
                 {
                     Debug.Assert(node != IntPtr.Zero);
 
-                    if (castToBone)
+                    if (_exportOptions.continuousBoneHierarchy && !castToBone)
+                    {
+                        if (connectedBones.Contains(frame))
+                            AsFbxSetJointsNode_CastToBone(_pContext, node, _exportOptions.boneSize);
+                        else
+                            AsFbxSetJointsNode_Generic(_pContext, node);
+                    }
+                    else if (castToBone)
                     {
                         AsFbxSetJointsNode_CastToBone(_pContext, node, _exportOptions.boneSize);
                     }

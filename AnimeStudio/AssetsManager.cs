@@ -165,7 +165,6 @@ namespace AnimeStudio
             importFiles.Clear();
             importFilesHash.Clear();
             noexistFiles.Clear();
-            assetsFileListHash.Clear();
             AssetsHelper.ClearOffsets();
 
             if (!SkipProcess)
@@ -317,7 +316,7 @@ namespace AnimeStudio
                     var assetsFile = new SerializedFile(reader, this);
                     CheckStrippedVersion(assetsFile);
                     assetsFileList.Add(assetsFile);
-                    assetsFileIndexCache.Add(assetsFile.fileName, assetsFileList.Count - 1);
+                    assetsFileIndexCache[assetsFile.fileName] = assetsFileList.Count - 1;
                     assetsFileListHash.Add(assetsFile.fileName);
 
                     // External lookup does recursive Directory.GetFiles scans. Skip it when
@@ -390,7 +389,7 @@ namespace AnimeStudio
                     }
                     CheckStrippedVersion(assetsFile);
                     assetsFileList.Add(assetsFile);
-                    assetsFileIndexCache.Add(assetsFile.fileName, assetsFileList.Count - 1);
+                    assetsFileIndexCache[assetsFile.fileName] = assetsFileList.Count - 1;
                     assetsFileListHash.Add(assetsFile.fileName);
                 }
                 catch (Exception e)
@@ -826,6 +825,11 @@ namespace AnimeStudio
                     {
                         Logger.Info("Reading assets has been cancelled !!");
                         return;
+                    }
+                    if (assetsFile.ObjectsDic.ContainsKey(objectInfo.m_PathID))
+                    {
+                        Progress.Report(++i, progressCount);
+                        continue;
                     }
                     var objectReader = new ObjectReader(assetsFile.reader, assetsFile, objectInfo, Game);
                     try

@@ -17,7 +17,9 @@ namespace AnimeStudio
                 switch (m_ACLClip)
                 {
                     case GIACLClip giaclClip:
-                        DBACL.DecompressTracks(giaclClip.m_ClipData, giaclClip.m_DatabaseData, out values, out times);
+                        DBACL.DecompressTracks(giaclClip.m_ClipData, giaclClip.m_DatabaseData, out values, out times, isGenshin: true);
+                        if (times.Length == 0 || values.LongLength != (long)times.Length * giaclClip.CurveCount)
+                            throw new System.IO.InvalidDataException("Genshin ACL sample count does not match the clip's curve count.");
                         break;
                     case ZZZACLClip zzzaclClip:
                         DBACL.DecompressTracksV2(zzzaclClip.m_TransformData, zzzaclClip.m_ScalarData, zzzaclClip.m_databaseData, zzzaclClip.m_DatabaseData, out values, out times);

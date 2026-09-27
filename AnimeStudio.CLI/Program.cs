@@ -11,7 +11,13 @@ namespace AnimeStudio.CLI
 {
     public class Program
     {
-        public static void Main(string[] args) => CommandLine.Init(args);
+        public static void Main(string[] args)
+        {
+            if (args.Length > 0 && args[0] == "--genshin-model")
+                Environment.ExitCode = GenshinModelCommand.Run(args);
+            else
+                CommandLine.Init(args);
+        }
 
         public static void Run(Options o)
         {

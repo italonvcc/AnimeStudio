@@ -124,7 +124,7 @@ namespace AnimeStudio
             {
                 var frameList = new List<ImportedFrame>();
                 var tempTransform = m_Transform;
-                while (tempTransform.m_Father.TryGet(out var m_Father))
+                while (!options.exportAnimatorRootOnly && tempTransform.m_Father.TryGet(out var m_Father))
                 {
                     frameList.Add(ConvertTransform(m_Father));
                     tempTransform = m_Father;
@@ -1180,6 +1180,7 @@ namespace AnimeStudio
             public Game game;
             public bool collectAnimations;
             public bool exportMaterials;
+            public bool exportAnimatorRootOnly;
             public HashSet<Material> materials;
             public Dictionary<string, (bool, int)> uvs;
             public Dictionary<string, int> texs; 

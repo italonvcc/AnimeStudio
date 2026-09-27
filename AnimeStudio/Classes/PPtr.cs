@@ -4,7 +4,7 @@ using System.Collections.Generic;
 
 namespace AnimeStudio
 {
-    public sealed class PPtr<T> : IYAMLExportable where T : Object
+    public sealed class PPtr<T> : IYAMLExportable, IObjectReference where T : Object
     {
         public int m_FileID;
         public long m_PathID;
@@ -13,6 +13,18 @@ namespace AnimeStudio
         private int index = -2; //-2 - Prepare, -1 - Missing
         private int lastAssetsFileCount = -1;
         
+        long IObjectReference.PathID => m_PathID;
+        Type IObjectReference.ObjectType => typeof(T);
+        string IObjectReference.SerializedFileName => m_FileID == 0 ? assetsFile?.fileName :
+            assetsFile != null && m_FileID > 0 && m_FileID <= assetsFile.m_Externals.Count
+                ? assetsFile.m_Externals[m_FileID - 1].fileName : null;
+        bool IObjectReference.TryGetObject(out Object value)
+        {
+            var success = TryGet(out T typed);
+            value = typed;
+            return success;
+        }
+
         public string Name => TryGet(out var obj) ? obj.Name : string.Empty;
 
         public PPtr(int m_FileID,  long m_PathID, SerializedFile assetsFile)

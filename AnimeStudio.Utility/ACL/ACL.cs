@@ -136,47 +136,70 @@ namespace ACLLibs
 
             DisposeZZZV2(ref decompressedClip);
         }
-        public static void DecompressTracks(byte[] data, byte[] db, out float[] values, out float[] times, bool isZZZ = false)
+        public static void DecompressTracks(byte[] data, byte[] db, out float[] values, out float[] times, bool isZZZ = false, bool isGenshin = false)
         {
             var decompressedClip = new DecompressedClip();
-
-            var dataPtr = Marshal.AllocHGlobal(data.Length + 8);
-            var dataAligned = new IntPtr(16 * (((long)dataPtr + 15) / 16));
-            Marshal.Copy(data, 0, dataAligned, data.Length);
-
-            var dbPtr = Marshal.AllocHGlobal(db.Length + 8);
-            var dbAligned = new IntPtr(16 * (((long)dbPtr + 15) / 16));
-            Marshal.Copy(db, 0, dbAligned, db.Length);
-
-            // as long as m_ClipData is passed to the DB dll without the rest it should be fine
-            // m_databaseData doesn't seem to be used. For now
-            var streamer = IntPtr.Zero;
-            if (isZZZ)
+            var bulkOffset = isGenshin ? GenshinBulkOffset(db) : 0;
+            var dataPtr = Marshal.AllocHGlobal(checked(data.Length + 15));
+            var dbPtr = IntPtr.Zero;
+            try
             {
-                DecompressTracksZZZ(dataAligned, dbAligned, streamer, ref decompressedClip);
+                var dataAligned = new IntPtr(16 * (((long)dataPtr + 15) / 16));
+                Marshal.Copy(data, 0, dataAligned, data.Length);
+
+                dbPtr = Marshal.AllocHGlobal(checked(db.Length + 15));
+                var dbAligned = new IntPtr(16 * (((long)dbPtr + 15) / 16));
+                Marshal.Copy(db, 0, dbAligned, db.Length);
+
+                // Genshin appends the external database tiers after the serialized database header.
+                // A null streamer leaves the MHY scalar context uninitialized and decodes garbage.
+                var streamer = isGenshin ? IntPtr.Add(dbAligned, bulkOffset) : IntPtr.Zero;
+                if (isZZZ)
+                {
+                    DecompressTracksZZZ(dataAligned, dbAligned, streamer, ref decompressedClip);
+                }
+                else
+                {
+                    DecompressTracks(dataAligned, dbAligned, streamer, ref decompressedClip);
+                }
+
+                values = new float[decompressedClip.ValuesCount];
+                Marshal.Copy(decompressedClip.Values, values, 0, decompressedClip.ValuesCount);
+
+                times = new float[decompressedClip.TimesCount];
+                Marshal.Copy(decompressedClip.Times, times, 0, decompressedClip.TimesCount);
             }
-            else
+            finally
             {
-                DecompressTracks(dataAligned, dbAligned, streamer, ref decompressedClip);
+                if (isZZZ)
+                {
+                    DisposeZZZ(ref decompressedClip);
+                }
+                else
+                {
+                    Dispose(ref decompressedClip);
+                }
+                Marshal.FreeHGlobal(dataPtr);
+                if (dbPtr != IntPtr.Zero) Marshal.FreeHGlobal(dbPtr);
             }
+        }
 
-            Marshal.FreeHGlobal(dataPtr);
-            Marshal.FreeHGlobal(dbPtr);
-
-            values = new float[decompressedClip.ValuesCount];
-            Marshal.Copy(decompressedClip.Values, values, 0, decompressedClip.ValuesCount);
-
-            times = new float[decompressedClip.TimesCount];
-            Marshal.Copy(decompressedClip.Times, times, 0, decompressedClip.TimesCount);
-
-            if (isZZZ)
-            {
-                DisposeZZZ(ref decompressedClip);
-            }
-            else
-            {
-                Dispose(ref decompressedClip);
-            }
+        internal static int GenshinBulkOffset(byte[] database)
+        {
+            // raw_buffer_header (8 bytes), then database_header; offsets match the vendored ACL DB format.
+            if (database == null || database.Length < 64 || BitConverter.ToUInt32(database, 8) != 0xAC11DB01)
+                throw new System.IO.InvalidDataException("Missing or invalid Genshin ACL database header.");
+            var version = BitConverter.ToUInt16(database, 12);
+            if (version != 100 || (BitConverter.ToUInt16(database, 14) & 1) != 0)
+                throw new System.IO.InvalidDataException("Unsupported Genshin ACL database version or inline layout.");
+            long size = BitConverter.ToUInt32(database, 0);
+            long offset = (size + 3) & ~3L;
+            long mediumSize = BitConverter.ToUInt32(database, 40);
+            long lowSize = BitConverter.ToUInt32(database, 44);
+            long total = offset + ((mediumSize + 3) & ~3L) + lowSize;
+            if (size < 64 || total > database.Length)
+                throw new System.IO.InvalidDataException("Genshin ACL database bulk data is truncated.");
+            return checked((int)offset);
         }
 
         #region importfunctions
