@@ -73,12 +73,16 @@ namespace AnimeStudio
         public TextureFormat m_TextureFormat;
         public bool m_MipMap;
         public int m_MipCount;
+        public int m_ImageCount;
+        public int m_TextureDimension;
         public GLTextureSettings m_TextureSettings;
         public ResourceReader image_data;
         public StreamingInfo m_StreamData;
 
-        private static bool HasGNFTexture(SerializedType type) => type.Match("1D52BB98AA5F54C67C22C39E8B2E400F");
-        private static bool HasExternalMipRelativeOffset(SerializedType type) => type.Match("1D52BB98AA5F54C67C22C39E8B2E400F", "5390A985F58D5524F95DB240E8789704");
+        // The last fingerprint is the observed GI 7.0 Cubemap layout, sharing
+        // these header fields with Texture2D; do not apply them to unknown layouts.
+        private static bool HasGNFTexture(SerializedType type) => type.Match("1D52BB98AA5F54C67C22C39E8B2E400F", "285F64E452C966AD1FFF6626784F3FA6");
+        private static bool HasExternalMipRelativeOffset(SerializedType type) => type.Match("1D52BB98AA5F54C67C22C39E8B2E400F", "5390A985F58D5524F95DB240E8789704", "285F64E452C966AD1FFF6626784F3FA6");
         private static bool TypeTreeHasField(SerializedType type, string fieldName)
         {
             if (type?.m_Type?.m_Nodes == null)
@@ -167,8 +171,8 @@ namespace AnimeStudio
             {
                 reader.AlignStream();
             }
-            var m_ImageCount = reader.ReadInt32();
-            var m_TextureDimension = reader.ReadInt32();
+            m_ImageCount = reader.ReadInt32();
+            m_TextureDimension = reader.ReadInt32();
             m_TextureSettings = new GLTextureSettings(reader);
             if (version[0] >= 3) //3.0 and up
             {

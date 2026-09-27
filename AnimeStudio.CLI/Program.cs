@@ -13,8 +13,10 @@ namespace AnimeStudio.CLI
     {
         public static void Main(string[] args)
         {
-            if (args.Length > 0 && args[0] == "--genshin-model")
+            if (args.Length > 0 && args[0] is "--genshin-model" or "--genshin-prefab" or "--genshin-assemble" or "--genshin-vfx")
                 Environment.ExitCode = GenshinModelCommand.Run(args);
+            else if (args.Length > 0 && args[0] is "--genshin-audio" or "--genshin-banks" or "--genshin-bank-ids" or "--genshin-event-graph")
+                Environment.ExitCode = GenshinAudioCommand.Run(args);
             else
                 CommandLine.Init(args);
         }

@@ -1257,9 +1257,10 @@ namespace AnimeStudio
                 try
                 {
                     m_ParsedForm = new SerializedShader(reader);
-                } catch (System.IO.EndOfStreamException)
+                } catch (Exception ex) when (ex is System.IO.EndOfStreamException ||
+                    (reader.Game.Type.IsGI() && version[0] == 2017 && ex is (OverflowException or ArgumentOutOfRangeException or System.IO.InvalidDataException)))
                 {
-                    Logger.Error($"Cannot parse shader, no more bytes left for asset {reader.assetsFile.fileName} of {reader.assetsFile.originalPath} at path {reader.m_PathID}.");
+                    Logger.Warning($"Shader program parsing failed ({ex.GetType().Name}) for {reader.assetsFile.fileName} at path {reader.m_PathID}; preserving identity and raw data.");
                     if (reader.Game.Type.IsGI() && version[0] == 2017 && byteSize <= 64 * 1024 * 1024)
                     {
                         recoveredName = GenshinShaderNameReader.TryRead(GetRawData());

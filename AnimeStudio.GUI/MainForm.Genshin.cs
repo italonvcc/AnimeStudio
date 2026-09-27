@@ -15,7 +15,14 @@ namespace AnimeStudio.GUI
             if (genshinExportMenu == null)
             {
                 genshinExportMenu = new ToolStripMenuItem("Genshin Impact");
-                genshinExportMenu.DropDownItems.Add("Export model with dependencies and manifest...", null, ExportGenshinModel);
+                genshinExportMenu.DropDownItems.Add("Export model or prefab with dependencies and manifest...", null, ExportGenshinModel);
+                genshinExportMenu.DropDownItems.Add("Export named voices / event media...", null, ExportGenshinAudio);
+                var assemblyItem = new ToolStripMenuItem("Assemble compatible Manekin parts from request...") { Tag = "Assembly" };
+                assemblyItem.Click += ExportGenshinRequest;
+                genshinExportMenu.DropDownItems.Add(assemblyItem);
+                var vfxItem = new ToolStripMenuItem("Export per-action VFX dependencies from request...") { Tag = "Vfx" };
+                vfxItem.Click += ExportGenshinRequest;
+                genshinExportMenu.DropDownItems.Add(vfxItem);
                 var bakeItem = new ToolStripMenuItem("Export model and humanoid clips (Unity-assisted FBX + .anim)...") { Tag = "UnityBake" };
                 bakeItem.Click += ExportGenshinModel;
                 genshinExportMenu.DropDownItems.Add(bakeItem);
@@ -40,10 +47,10 @@ namespace AnimeStudio.GUI
         private async void ExportGenshinModel(object sender, EventArgs args)
         {
             var selected = GetSelectedAssets();
-            var roots = selected.Where(a => a.Asset is Animator).ToArray();
-            if (roots.Length != 1 || selected.Any(a => a.Asset is not (Animator or AnimationClip)))
+            var roots = selected.Where(a => a.Asset is Animator or GameObject).ToArray();
+            if (roots.Length != 1 || selected.Any(a => a.Asset is not (Animator or GameObject or AnimationClip)))
             {
-                MessageBox.Show(this, "Select one Animator and optionally its AnimationClip assets first.", "Genshin model export");
+                MessageBox.Show(this, "Select one Animator or prefab GameObject and optionally its AnimationClip assets first.", "Genshin model export");
                 return;
             }
             var map = ResourceMap.GetEntries().ToArray();
@@ -79,7 +86,7 @@ namespace AnimeStudio.GUI
             }
             using var dialog = new FolderBrowserDialog { Description = "Select the parent folder for a new model export" };
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
-            var animator = (Animator)roots[0].Asset;
+            var animator = roots[0].Asset;
             var clips = selected.Select(a => a.Asset).OfType<AnimationClip>().ToArray();
             var name = string.Concat(animator.Name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
             var destination = Path.Combine(dialog.SelectedPath, name);
@@ -90,6 +97,58 @@ namespace AnimeStudio.GUI
                 MessageBox.Show(this, $"Exported {result}\nSee manifest.json for unresolved references and scope.", "Genshin model export");
             }
             catch (Exception ex) { Logger.Error(ex.Message); MessageBox.Show(this, ex.Message, "Genshin export failed"); }
+            finally { Enabled = true; }
+        }
+
+        private async void ExportGenshinRequest(object sender, EventArgs args)
+        {
+            using var request = new OpenFileDialog { Title = "Select the assembly or per-action VFX request", Filter = "Export request|*.json", CheckFileExists = true };
+            if (request.ShowDialog(this) != DialogResult.OK) return;
+            using var maps = new OpenFileDialog { Title = "Select the original asset map and any supplemental scene maps", Filter = "Asset maps|*.map;*.json", Multiselect = true, CheckFileExists = true };
+            if (maps.ShowDialog(this) != DialogResult.OK) return;
+            using var output = new FolderBrowserDialog { Description = "Select a parent directory for a new export" };
+            if (output.ShowDialog(this) != DialogResult.OK) return;
+            string destination = Path.Combine(output.SelectedPath, Path.GetFileNameWithoutExtension(request.FileName));
+            bool assembly = sender is ToolStripMenuItem item && (string)item.Tag == "Assembly";
+            Enabled = false;
+            try
+            {
+                var result = await Task.Run(() =>
+                {
+                    var entries = new System.Collections.Generic.List<AssetEntry>();
+                    foreach (string map in maps.FileNames)
+                    {
+                        if (ResourceMap.FromFile(map) < 0 || !ResourceMap.GetGameType().IsGI()) throw new InvalidDataException("Select valid Genshin asset maps.");
+                        entries.AddRange(ResourceMap.GetEntries());
+                    }
+                    var unique = entries.DistinctBy(e => (e.Source, e.Offset, e.PathID, e.Type)).ToArray();
+                    return assembly ? GenshinAssemblyExporter.Export(Studio.assetsManager, unique, request.FileName, destination)
+                        : GenshinVfxExporter.Export(Studio.assetsManager, unique, request.FileName, destination);
+                });
+                MessageBox.Show(this, $"Exported {result}\nSee manifest.json for compatibility checks, missing assets and unsupported components.", "Genshin export");
+            }
+            catch (Exception ex) { Logger.Error(ex.Message); MessageBox.Show(this, ex.Message, "Genshin export failed"); }
+            finally { Enabled = true; }
+        }
+
+        private async void ExportGenshinAudio(object sender, EventArgs args)
+        {
+            using var names = new OpenFileDialog { Title = "Select evidenced voice names or event-media request", Filter = "Named audio request|*.json", CheckFileExists = true };
+            if (names.ShowDialog(this) != DialogResult.OK) return;
+            using var input = new FolderBrowserDialog { Description = "Select the installed game's AudioAssets folder" };
+            if (input.ShowDialog(this) != DialogResult.OK) return;
+            using var output = new FolderBrowserDialog { Description = "Select a parent folder for a new named-audio export" };
+            if (output.ShowDialog(this) != DialogResult.OK) return;
+            using var decoder = new OpenFileDialog { Title = "Optional: select vgmstream-cli for WAV output (Cancel exports WEM only)", Filter = "vgmstream CLI|vgmstream-cli.exe", CheckFileExists = true };
+            string decoderPath = decoder.ShowDialog(this) == DialogResult.OK ? decoder.FileName : null;
+            string destination = Path.Combine(output.SelectedPath, Path.GetFileNameWithoutExtension(names.FileName));
+            Enabled = false;
+            try
+            {
+                await Task.Run(() => GenshinAudioExporter.ExportNames(input.SelectedPath, names.FileName, destination, decoderPath));
+                MessageBox.Show(this, $"Export finished: {destination}\nCheck manifest.json for missing languages, ambiguous media, and decode failures.", "Genshin audio export");
+            }
+            catch (Exception ex) { Logger.Error(ex.Message); MessageBox.Show(this, ex.Message, "Genshin audio export failed"); }
             finally { Enabled = true; }
         }
 

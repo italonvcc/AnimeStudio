@@ -97,7 +97,7 @@ namespace AnimeStudio
                 switch (obj)
                 {
                     case GameObject gameObject:
-                        for (int i = 0; i < gameObject.m_Components.Count; i++) Add($"m_Components[{i}]", gameObject.m_Components[i]);
+                        for (int i = 0; i < gameObject.m_Components.Count; i++) Add($"m_Components[{i}]", gameObject.m_Components[i].Cast<Object>());
                         break;
                     case Transform transform:
                         for (int i = 0; i < transform.m_Children.Count; i++) Add($"m_Children[{i}]", transform.m_Children[i]);
@@ -105,6 +105,10 @@ namespace AnimeStudio
                     case Animator animator:
                         Add("m_Avatar", animator.m_Avatar);
                         // Controllers can pull in an entire game's clip library. Clips are explicit roots.
+                        break;
+                    case Animation animation:
+                        Add("m_Animation", animation.m_Animation);
+                        for (int i = 0; i < animation.m_Animations.Count; i++) Add($"m_Animations[{i}]", animation.m_Animations[i]);
                         break;
                     case MeshFilter filter:
                         Add("m_Mesh", filter.m_Mesh);
