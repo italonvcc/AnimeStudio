@@ -272,11 +272,15 @@ namespace AnimeStudio.GUI
             logger.DeferredErrorCount = 0; logger.FirstDeferredError = null; logger.DeferErrors = true;
             StatusStripUpdate("Starting...");
             menuStrip1.Enabled = false;
+            tabControl1.Enabled = false;
+            tabControl2.Enabled = false;
             if (assetBrowser != null && !assetBrowser.IsDisposed) assetBrowser.Enabled = false;
         }
         private void EndOperation()
         {
             operationClock = null; menuStrip1.Enabled = true;
+            tabControl1.Enabled = true;
+            tabControl2.Enabled = true;
             if (assetBrowser != null && !assetBrowser.IsDisposed) assetBrowser.Enabled = true;
             logger.DeferErrors = false;
             if (logger.DeferredErrorCount > 0)
@@ -426,7 +430,13 @@ namespace AnimeStudio.GUI
             catch (Exception e) { MessageBox.Show(this, e.ToString(), "Loading failed"); }
         }
 
-        internal async Task LoadPathsAsync(List<AssetFilterDataItem> filterData, params string[] paths)
+        internal Task LoadPathsAsync(List<AssetFilterDataItem> filterData, params string[] paths)
+            => LoadPathsCoreAsync(null, filterData, paths);
+
+        internal Task LoadSelectedPathsAsync(GameType mapGame, List<AssetFilterDataItem> filterData, params string[] paths)
+            => LoadPathsCoreAsync(mapGame, filterData, paths);
+
+        private async Task LoadPathsCoreAsync(GameType? mapGame, List<AssetFilterDataItem> filterData, string[] paths)
         {
             if (operationClock != null) throw new InvalidOperationException("Another operation is already running.");
             // A filtered map selection reads bundle offsets, not every byte in the
@@ -440,16 +450,47 @@ namespace AnimeStudio.GUI
             BeginOperation("Loading assets");
             try
             {
-                ResetForm();
+                Logger.Info("Releasing previous asset view...");
+                ResetFormView();
+                Logger.Info("Closing previous asset files...");
+                await ReleaseLoadedAssetsAsync();
+                if (mapGame.HasValue) ApplyGame(GameManager.GetGameByType(mapGame.Value));
                 assetsManager.SpecifyUnityVersion = specifyUnityVersion.Text;
                 assetsManager.Game = Studio.Game;
-                if (filterData != null)
-                    assetsManager.FilterData = new AssetFilterData { Items = filterData };
-                if (paths.Length == 1 && Directory.Exists(paths[0]))
-                    await Task.Run(() => assetsManager.LoadFolder(paths[0]));
-                else
-                    await Task.Run(() => assetsManager.LoadFiles(paths, mergeSplitAssets: !boundedSelection));
-                await BuildAssetStructures(paths);
+                assetsManager.FilterData = new AssetFilterData { Items = filterData ?? new List<AssetFilterDataItem>() };
+                assetsManager.ObjectReadWorkers = boundedSelection && Studio.Game.Type.IsGI() ? GenshinExportWorkers.Count : 1;
+                Logger.Info("Reading selected asset files...");
+                bool scopedModel = boundedSelection && Studio.Game.Type.IsGI() && assetsManager.ResolveDependencies &&
+                    filterData.All(item => item.Type is ClassIDType.Animator or ClassIDType.GameObject);
+                var modelMap = scopedModel ? (characterReferences?.IsCompletedSuccessfully == true
+                    ? characterReferences.Result.Entries : ResourceMap.GetEntries()) : null;
+                HashSet<AnimeStudio.Object> sceneObjects = await Task.Run(() =>
+                {
+                    bool resolve = assetsManager.ResolveDependencies;
+                    bool selectedOffsets = assetsManager.UseSelectedGenshinOffsets;
+                    try
+                    {
+                        assetsManager.UseSelectedGenshinOffsets = scopedModel;
+                        if (scopedModel) assetsManager.ResolveDependencies = false;
+                        if (paths.Length == 1 && Directory.Exists(paths[0])) assetsManager.LoadFolder(paths[0]);
+                        else assetsManager.LoadFiles(paths, mergeSplitAssets: !boundedSelection);
+                        if (!scopedModel) return null;
+                        var roots = filterData.Select(item => assetsManager.FindAsset(new AssetEntry {
+                            Source = item.Source, Offset = item.Offset, PathID = item.PathID, Name = item.Name, Type = item.Type
+                        }) ?? throw new InvalidDataException("Selected model no longer matches the map: " + item.Name)).ToArray();
+                        var graph = new AssetDependencyResolver(assetsManager, modelMap).Resolve(roots);
+                        foreach (var missing in graph.Missing)
+                            Logger.Warning($"Unresolved model reference: {missing.OwnerName}.{missing.Field} -> {missing.TargetFile}:{missing.TargetPathID} ({missing.Reason})");
+                        Logger.Info($"Selected model graph: {graph.Objects.Count} objects, {graph.LoadedBundles} dependency bundles, {graph.Missing.Count} unresolved references");
+                        return graph.Objects.ToHashSet();
+                    }
+                    finally
+                    {
+                        assetsManager.ResolveDependencies = resolve;
+                        assetsManager.UseSelectedGenshinOffsets = selectedOffsets;
+                    }
+                });
+                await BuildAssetStructures(paths, sceneObjects);
             }
             finally { EndOperation(); }
         }
@@ -525,7 +566,9 @@ namespace AnimeStudio.GUI
             }
         }
 
-        private async Task BuildAssetStructures(params string[] sourcePaths)
+        private Task BuildAssetStructures(params string[] sourcePaths) => BuildAssetStructures(sourcePaths, null);
+
+        private async Task BuildAssetStructures(string[] sourcePaths, HashSet<AnimeStudio.Object> sceneObjects)
         {
             if (assetsManager.assetsFileList.Count == 0)
             {
@@ -543,7 +586,7 @@ namespace AnimeStudio.GUI
                 return;
             }
 
-            (var productName, var treeNodeCollection) = await Task.Run(BuildAssetData);
+            (var productName, var treeNodeCollection) = await Task.Run(() => BuildAssetData(sceneObjects));
             var typeMap = await Task.Run(BuildClassStructure);
 
             if (string.IsNullOrEmpty(productName))
@@ -1839,16 +1882,37 @@ namespace AnimeStudio.GUI
 
         public void ResetForm()
         {
-            Text = $"AnimeStudio v{System.Windows.Forms.Application.ProductVersion}";
+            ResetFormView();
             assetsManager.Clear();
             assemblyLoader.Clear();
-            exportableAssets.Clear();
-            visibleAssets.Clear();
-            sceneTreeView.Nodes.Clear();
+        }
+
+        internal static Task ReleaseLoadedAssetsAsync() => Task.Run(() =>
+        {
+            assetsManager.Clear();
+            assemblyLoader.Clear();
+        });
+
+        private void ResetFormView()
+        {
+            Text = $"AnimeStudio v{System.Windows.Forms.Application.ProductVersion}";
             assetListView.VirtualListSize = 0;
-            assetListView.Items.Clear();
-            classesListView.Items.Clear();
-            classesListView.Groups.Clear();
+            exportableAssets = new List<AssetItem>();
+            visibleAssets = exportableAssets;
+            sceneTreeView.BeginUpdate();
+            classesListView.BeginUpdate();
+            try
+            {
+                sceneTreeView.Nodes.Clear();
+                assetListView.Items.Clear();
+                classesListView.Items.Clear();
+                classesListView.Groups.Clear();
+            }
+            finally { classesListView.EndUpdate(); sceneTreeView.EndUpdate(); }
+            treeSrcResults.Clear();
+            nextGObject = 0;
+            dumpTextBox.Clear();
+            classTextBox.Clear();
             previewPanel.BackgroundImage = Properties.Resources.preview;
             previewPanel.ContextMenuStrip = null;
             imageTexture?.Dispose();
@@ -2518,10 +2582,15 @@ namespace AnimeStudio.GUI
 
         public void updateGame(Game game)
         {
+            ResetForm();
+            ApplyGame(game);
+        }
+
+        private void ApplyGame(Game game)
+        {
             int index = GameManager.GetGameIndex(game);
             Properties.Settings.Default.selectedGame = index;
             Properties.Settings.Default.Save();
-            ResetForm();
             Studio.Game = game;
             UpdateGameExportMenu();
             Logger.Info($"Target Game is {Studio.Game.Name}");
@@ -2535,25 +2604,7 @@ namespace AnimeStudio.GUI
 
         public void updateGame(GameType mapGame)
         {
-            Game game = GameManager.GetGameByType(mapGame);
-            int index = GameManager.GetGameIndex(game);
-
-            Properties.Settings.Default.selectedGame = index;
-            Properties.Settings.Default.Save();
-
-            ResetForm();
-
-            Studio.Game = game;
-            UpdateGameExportMenu();
-            Logger.Info($"Target Game is {Studio.Game.Name}");
-
-            if (Studio.Game.IsUnityCN() && Studio.Game is UnityCNGame unityCnGame)
-            {
-                UnityCNManager.SetKey(unityCnGame.Key);
-            }
-
-            assetsManager.SpecifyUnityVersion = specifyUnityVersion.Text;
-            assetsManager.Game = Studio.Game;
+            updateGame(GameManager.GetGameByType(mapGame));
         }
 
         private async void specifyNameComboBox_SelectedIndexChanged(object sender, EventArgs e)

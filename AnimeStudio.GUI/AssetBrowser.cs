@@ -209,8 +209,7 @@ namespace AnimeStudio.GUI
             {
                 Logger.Info("Loading...");
                 bringMainToFront();
-                _parent.updateGame(ResourceMap.GetGameType());
-                try { await _parent.LoadPathsAsync(files, filePaths.ToArray()); }
+                try { await _parent.LoadSelectedPathsAsync(ResourceMap.GetGameType(), files, filePaths.ToArray()); }
                 catch (Exception ex) { MessageBox.Show(this, ex.ToString(), "Loading selected assets failed"); }
             }
         }

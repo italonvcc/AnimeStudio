@@ -20,6 +20,10 @@ namespace AnimeStudio
         // Opt-in for GI exports. Each worker owns a different serialized-file
         // cursor; graph linking still runs after all parsing has completed.
         public int ObjectReadWorkers { get; set; } = 1;
+        // Map-browser model loads can seek directly to selected GI bundles.
+        // Keep legacy export discovery unchanged: it can rely on other objects
+        // from the same block for animation path/source-version selection.
+        public bool UseSelectedGenshinOffsets { get; set; }
         public string SpecifyUnityVersion;
         /// <summary>
         /// Invoked after each bundle/CAB group is loaded from a multi-bundle block.
@@ -641,7 +645,9 @@ namespace AnimeStudio
                     var total = stream.Length;
 
                     OffsetData.TryGetValue(reader.FileName, out var manualOffsets);
-                    bool isManualOffsets = (manualOffsets != null && manualOffsets.Count > 0) && Game.Type.IsArknightsEndfieldGroup();
+                    bool selectedGenshinOffsets = UseSelectedGenshinOffsets && Game.Type.IsGI() && manualOffsets?.Count > 0;
+                    bool isManualOffsets = (manualOffsets != null && manualOffsets.Count > 0) &&
+                        (Game.Type.IsArknightsEndfieldGroup() || selectedGenshinOffsets);
                     IEnumerable<long> offsetsEnumerable = isManualOffsets
                         ? manualOffsets
                         : stream.GetOffsets(reader.FullPath);
@@ -650,12 +656,15 @@ namespace AnimeStudio
                     int? manualTotal = (manualOffsets != null && manualOffsets.Count > 0) ? manualOffsets.Count : (int?)null;
                     foreach (var offset in offsetsEnumerable)
                     {
+                        // Match GetOffsets' cursor setup before FileReader probes
+                        // the bundle header. GI map offsets are absolute in the block.
+                        if (selectedGenshinOffsets) stream.Offset = offset;
                         var name = offset.ToString("X8");
                         Logger.Verbose($"Loading Block {name}");
 
                         var dummyPath = Path.Combine(Path.GetDirectoryName(reader.FullPath), name);
                         var subReader = new FileReader(dummyPath, stream, true);
-                        if (isManualOffsets)
+                        if (isManualOffsets && !selectedGenshinOffsets)
                             subReader.Position = offset;
                         LoadGameBlockFile(subReader, reader.FullPath, offset, false);
 

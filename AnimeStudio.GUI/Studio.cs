@@ -305,7 +305,7 @@ namespace AnimeStudio.GUI
             }
         }
 
-        public static (string, List<TreeNode>) BuildAssetData()
+        public static (string, List<TreeNode>) BuildAssetData(HashSet<Object> sceneObjects = null)
         {
             StatusStripUpdate("Building asset list...");
 
@@ -515,6 +515,7 @@ namespace AnimeStudio.GUI
 
                     foreach (var obj in assetsFile.Objects)
                     {
+                        if (sceneObjects != null && !sceneObjects.Contains(obj)) continue;
                         if (assetsManager.tokenSource.IsCancellationRequested)
                         {
                             Logger.Info("Building tree structure been cancelled !!");
@@ -578,7 +579,8 @@ namespace AnimeStudio.GUI
                             {
                                 if (m_GameObject.m_Transform.m_Father.TryGet(out var m_Father))
                                 {
-                                    if (m_Father.m_GameObject.TryGet(out var parentGameObject))
+                                    if (m_Father.m_GameObject.TryGet(out var parentGameObject) &&
+                                        (sceneObjects == null || sceneObjects.Contains(parentGameObject)))
                                     {
                                         if (!treeNodeDictionary.TryGetValue(parentGameObject, out var parentGameObjectNode))
                                         {
