@@ -11,6 +11,7 @@ namespace AnimeStudio
 
         private SerializedFile assetsFile;
         private int index = -2; //-2 - Prepare, -1 - Missing
+        private int lastAssetsFileCount = -1;
         
         public string Name => TryGet(out var obj) ? obj.Name : string.Empty;
 
@@ -39,6 +40,7 @@ namespace AnimeStudio
         private bool TryGetAssetsFile(out SerializedFile result)
         {
             result = null;
+            if (assetsFile == null || IsNull) return false;
             if (m_FileID == 0)
             {
                 result = assetsFile;
@@ -51,14 +53,16 @@ namespace AnimeStudio
                 var assetsFileList = assetsManager.assetsFileList;
                 var assetsFileIndexCache = assetsManager.assetsFileIndexCache;
 
-                if (index == -2)
+                if (index < 0)
                 {
+                    if (lastAssetsFileCount == assetsFileList.Count) return false;
+                    lastAssetsFileCount = assetsFileList.Count;
                     var m_External = assetsFile.m_Externals[m_FileID - 1];
                     var name = m_External.fileName;
-                    if (!assetsFileIndexCache.TryGetValue(name, out index))
+                    if (!assetsFileIndexCache.TryGetValue(name, out index) || index < 0)
                     {
                         index = assetsFileList.FindIndex(x => x.fileName.Equals(name, StringComparison.OrdinalIgnoreCase));
-                        assetsFileIndexCache.Add(name, index);
+                        assetsFileIndexCache[name] = index;
                     }
                 }
 
@@ -136,10 +140,10 @@ namespace AnimeStudio
             var assetsFileList = assetsManager.assetsFileList;
             var assetsFileIndexCache = assetsManager.assetsFileIndexCache;
 
-            if (!assetsFileIndexCache.TryGetValue(name, out index))
+            if (!assetsFileIndexCache.TryGetValue(name, out index) || index < 0)
             {
                 index = assetsFileList.FindIndex(x => x.fileName.Equals(name, StringComparison.OrdinalIgnoreCase));
-                assetsFileIndexCache.Add(name, index);
+                assetsFileIndexCache[name] = index;
             }
 
             m_PathID = m_Object.m_PathID;

@@ -100,6 +100,7 @@ namespace AnimeStudio.GUI
             InitializeProgressBar();
             InitializeLogger();
             InitalizeOptions();
+            UpdateGameExportMenu();
             FMODinit();
         }
 
@@ -825,6 +826,7 @@ namespace AnimeStudio.GUI
                 InitializeExportOptions();
                 InitializeLogger();
                 InitalizeOptions();
+                UpdateGameExportMenu();
             }
         }
 
@@ -2494,6 +2496,7 @@ namespace AnimeStudio.GUI
             Properties.Settings.Default.Save();
             ResetForm();
             Studio.Game = game;
+            UpdateGameExportMenu();
             Logger.Info($"Target Game is {Studio.Game.Name}");
             if (Studio.Game.IsUnityCN() && Studio.Game is UnityCNGame unityCnGame)
             {
@@ -2514,6 +2517,7 @@ namespace AnimeStudio.GUI
             ResetForm();
 
             Studio.Game = game;
+            UpdateGameExportMenu();
             Logger.Info($"Target Game is {Studio.Game.Name}");
 
             if (Studio.Game.IsUnityCN() && Studio.Game is UnityCNGame unityCnGame)

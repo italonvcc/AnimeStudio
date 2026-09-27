@@ -790,6 +790,11 @@ namespace AnimeStudio
         {
             foreach (var animationClip in animationClipHashSet)
             {
+                if (!animationClip.m_Legacy && animationClip.m_ClipBindingConstant?.genericBindings
+                    ?.Any(binding => binding.typeID == ClassIDType.Animator && binding.customType == 8) == true)
+                {
+                    Logger.Warning($"{animationClip.m_Name}: humanoid Animator curves are not baked by FBX export. Body/finger animation may be missing; export the AnimationClip as .anim to preserve muscle curves.");
+                }
                 var iAnim = new ImportedKeyframedAnimation();
                 var name = animationClip.m_Name;
                 if (AnimationList.Exists(x => x.Name == name))
