@@ -38,6 +38,8 @@ namespace AnimeStudio
             foreach (var replacement in replacements ?? Array.Empty<GenshinPartReplacement>())
                 assembly.Add(new { source = Identity(replacement.Root), result = GenshinPartAssembler.Replace(converted,
                     new ModelConverter(replacement.Root, options, Array.Empty<AnimationClip>()), replacement.Slot, replacement.RemoveMeshes) });
+            Logger.Info("Restoring model bind pose from mesh skin matrices");
+            int bindPoseBones = GenshinBindPose.Restore(converted);
             Directory.CreateDirectory(destination);
             var name = SafeName(root.Name);
             var fbx = Path.Combine(destination, name + ".fbx");
@@ -58,6 +60,7 @@ namespace AnimeStudio
                 Directory.CreateDirectory(animationDirectory);
                 foreach (var clip in clips)
                 {
+                    Logger.Info($"Exporting animation {sourceClips.Count + 1}/{clips.Length}: {clip.Name}");
                     var file = SafeName(clip.Name) + "_" + clip.m_PathID + ".anim";
                     string yaml = clip.Convert(reduceConstantKeys: compactAnimations);
                     File.WriteAllText(Path.Combine(animationDirectory, file), compactAnimations ? GenshinAnimationText.Compact(yaml) : yaml);
@@ -86,7 +89,7 @@ namespace AnimeStudio
                 }),
                 meshes = converted.MeshList.Select(m => new { m.Path, vertices = m.VertexList.Count, bones = m.BoneList?.Count }),
                 clips = converted.AnimationList.Select(a => new { a.Name, a.SampleRate, tracks = a.TrackList.Count }),
-                sourceClips, assembly,
+                sourceClips, assembly, bindPoseBones,
                 animationStorage = compactAnimations ? "Wholly constant curves reduced to endpoints and compact YAML; moving curves and humanoid root/IK component keys preserved. No resampling or tolerance-based compression." : "Decoded source curves",
                 previewMaterials = converted.MaterialList.Select(m => new { name = m.Name, textures = m.Textures.Select(t => new { name = t.Name, destination = t.Dest,
                     offset = new { x = t.Offset.X, y = t.Offset.Y }, scale = new { x = t.Scale.X, y = t.Scale.Y } }) }),

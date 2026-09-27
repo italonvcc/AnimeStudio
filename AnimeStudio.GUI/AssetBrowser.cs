@@ -181,7 +181,7 @@ namespace AnimeStudio.GUI
             updateButtons();
             Logger.Info($"Cleared !!");
         }
-        private void loadSelected_Click(object sender, EventArgs e)
+        private async void loadSelected_Click(object sender, EventArgs e)
         {
             var files = assetDataGridView.SelectedRows.Cast<DataGridViewRow>()
             .Select(x => _assetEntries[x.Index])
@@ -198,7 +198,7 @@ namespace AnimeStudio.GUI
 
             var filePaths = files.Select(x => x.Source).ToHashSet();
 
-            var missingFiles = filePaths.Where(x => !File.Exists(x));
+            var missingFiles = filePaths.Where(x => !File.Exists(x)).ToArray();
             foreach (var file in missingFiles)
             {
                 Logger.Warning($"Unable to find file {file}, skipping...");
@@ -209,8 +209,9 @@ namespace AnimeStudio.GUI
             {
                 Logger.Info("Loading...");
                 bringMainToFront();
-                _parent.Invoke(() => _parent.updateGame(ResourceMap.GetGameType()));
-                _parent.Invoke(() => _parent.LoadPaths(files, filePaths.ToArray()));
+                _parent.updateGame(ResourceMap.GetGameType());
+                try { await _parent.LoadPathsAsync(files, filePaths.ToArray()); }
+                catch (Exception ex) { MessageBox.Show(this, ex.ToString(), "Loading selected assets failed"); }
             }
         }
         internal AssetEntry[] GetSelectedMapEntries() => assetDataGridView.SelectedRows.Cast<DataGridViewRow>()

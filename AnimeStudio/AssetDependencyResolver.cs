@@ -14,6 +14,10 @@ namespace AnimeStudio
         public int MaximumBundles { get; set; } = 512;
         public int MaximumPasses { get; set; } = 16;
 
+        // The complete graph has already been resolved; inspect subsets without
+        // rebuilding the map index or repeating dependency loads per effect.
+        public Result InspectLoaded(IEnumerable<Object> roots) => Finish(Walk(roots), 0);
+
         public AssetDependencyResolver(AssetsManager manager, IEnumerable<AssetEntry> map)
         {
             this.manager = manager;
@@ -36,6 +40,7 @@ namespace AnimeStudio
                 manager.ResolveDependencies = false;
                 for (int pass = 0; pass < MaximumPasses; pass++)
                 {
+                    Logger.Info($"Resolving dependencies: pass {pass + 1}, {loaded} bundles loaded");
                     cancellation.ThrowIfCancellationRequested();
                     var graph = Walk(rootList);
                     var pending = new List<AssetEntry>();

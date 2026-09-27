@@ -22,7 +22,7 @@ namespace AnimeStudio
             if (actions.Count is < 1 or > 32) throw new InvalidDataException("Supply 1–32 actions.");
             var map = entries.ToArray();
             var selectors = actions.SelectMany(a => a["effects"] ?? new JArray()).Concat(request["evidenceAssets"] ?? new JArray()).ToArray();
-            if (selectors.Length > 128) throw new InvalidDataException("Select at most 128 explicit roots/evidence assets.");
+            var byName = map.ToLookup(e => (e.Name, e.Type));
             var chosen = new Dictionary<JToken, AssetEntry>();
             var missingSelections = new List<object>();
             foreach (var selector in selectors)
@@ -31,7 +31,7 @@ namespace AnimeStudio
                 ClassIDType type = selector["type"] == null ? ClassIDType.GameObject : Enum.Parse<ClassIDType>((string)selector["type"]);
                 long? id = selector["pathID"] == null ? null : long.Parse((string)selector["pathID"]);
                 string source = (string)selector["source"];
-                var matches = map.Where(e => e.Name == name && e.Type == type && (id == null || e.PathID == id) && (source == null || string.Equals(source, e.Source, StringComparison.OrdinalIgnoreCase))).ToArray();
+                var matches = byName[(name, type)].Where(e => (id == null || e.PathID == id) && (source == null || string.Equals(source, e.Source, StringComparison.OrdinalIgnoreCase))).ToArray();
                 if (matches.Length != 1) { missingSelections.Add(new { selection = selector, count = matches.Length, reason = "Missing/ambiguous exact asset-map match" }); continue; }
                 if (matches[0].Offset < 0) throw new InvalidDataException("Regenerate the map with bundle offsets.");
                 chosen.Add(selector, matches[0]);
@@ -42,15 +42,19 @@ namespace AnimeStudio
                 manager.FilterData = new AssetsManager.AssetFilterData { Items = chosen.Values.Select(e => new AssetsManager.AssetFilterDataItem
                 { Source = e.Source, Offset = e.Offset, PathID = e.PathID, Name = e.Name, Type = e.Type }).ToList() };
                 manager.LoadFiles(chosen.Values.Select(e => e.Source).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), mergeSplitAssets: false);
-                Object Get(AssetEntry e) => manager.assetsFileList.SelectMany(f => f.ObjectsDic.Values).Single(o => o.type == e.Type && o.m_PathID == e.PathID && string.Equals(o.assetsFile.originalPath, e.Source, StringComparison.OrdinalIgnoreCase));
+                Object Get(AssetEntry e) => manager.FindAsset(e) ?? throw new InvalidDataException("VFX selection did not load: " + e.Name);
                 var roots = chosen.ToDictionary(p => p.Key, p => Get(p.Value));
                 if (roots.Count == 0) throw new InvalidDataException("No selected effect/evidence assets could be loaded.");
-                var graph = new AssetDependencyResolver(manager, map).Resolve(roots.Values);
+                Logger.Info($"Resolving {roots.Count} selected VFX roots/evidence assets");
+                var resolver = new AssetDependencyResolver(manager, map);
+                var graph = resolver.Resolve(roots.Values);
                 Directory.CreateDirectory(destination);
                 var settings = new JsonSerializerSettings { Converters = { new StringEnumConverter() } };
                 var outputs = new Dictionary<Object, string>(); var failures = new List<object>();
+                int completed = 0;
                 foreach (var obj in graph.Objects)
                 {
+                    if (completed++ % 25 == 0) Logger.Info($"Exporting VFX objects {completed}/{graph.Objects.Count}: {obj.type} {obj.Name}");
                     if (obj is Material && !exportMaterials) continue;
                     string folder = Path.Combine(destination, obj.type.ToString()); Directory.CreateDirectory(folder);
                     string file = Path.Combine(folder, Safe(obj.assetsFile.fileName) + "_" + obj.m_PathID);
@@ -133,7 +137,7 @@ namespace AnimeStudio
                     foreach (var effect in action["effects"] ?? new JArray())
                     {
                         if (!roots.TryGetValue(effect, out var root)) { effectReports.Add(new { selection = effect, status = "Missing/ambiguous" }); continue; }
-                        var subset = new AssetDependencyResolver(manager, map).Resolve(new[] { root });
+                        var subset = resolver.InspectLoaded(new[] { root });
                         effectReports.Add(new { selection = effect, identity = Identity(root), dependencies = subset.Objects.Select(o => new { identity = Identity(o), file = outputs.GetValueOrDefault(o) }), unresolved = subset.Missing,
                             unsupported = subset.Objects.Where(Unsupported).Select(Identity),
                             timing = "Runtime event timing/attachment schema is not decoded; source event data and local prefab transforms are retained." });

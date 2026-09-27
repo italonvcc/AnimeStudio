@@ -211,11 +211,14 @@ namespace AnimeStudio.GUI
         {
             logger = new GUILogger(StatusStripUpdate);
             ConsoleHelper.AllocConsole();
+            // Legacy console selection can suspend synchronous log writes.
+            ConsoleHelper.DisableQuickEdit();
             ConsoleHelper.SetConsoleTitle("Debug Console");
             var handle = ConsoleHelper.GetConsoleWindow();
+            logger.WriteConsole = enableConsole.Checked;
             if (enableConsole.Checked)
             {
-                Logger.Default = new ConsoleLogger();
+                Logger.Default = logger;
                 ConsoleHelper.ShowWindow(handle, ConsoleHelper.SW_SHOW);
             }
             else
@@ -244,8 +247,40 @@ namespace AnimeStudio.GUI
 
         private void InitializeProgressBar()
         {
-            Progress.Default = new Progress<int>(SetProgressBarValue);
+            Progress.Default = new BufferedProgress(SetProgressBarValue);
             Studio.StatusStripUpdate = StatusStripUpdate;
+            var timer = new System.Windows.Forms.Timer(components) { Interval = 100 };
+            timer.Tick += (_, _) => {
+                progressBar1.Value = Volatile.Read(ref pendingProgress);
+                string message = Volatile.Read(ref pendingStatus) ?? "";
+                toolStripStatusLabel1.Text = operationClock == null ? message : $"{operationName} [{operationClock.Elapsed:hh\\:mm\\:ss}] — {message}";
+            };
+            timer.Start();
+        }
+
+        private sealed class BufferedProgress(Action<int> report) : IProgress<int>
+        {
+            public void Report(int value) => report(value);
+        }
+        private int pendingProgress;
+        private string pendingStatus;
+        private Stopwatch operationClock;
+        private string operationName;
+        private void BeginOperation(string name)
+        {
+            operationName = name; operationClock = Stopwatch.StartNew();
+            logger.DeferredErrorCount = 0; logger.FirstDeferredError = null; logger.DeferErrors = true;
+            StatusStripUpdate("Starting...");
+            menuStrip1.Enabled = false;
+            if (assetBrowser != null && !assetBrowser.IsDisposed) assetBrowser.Enabled = false;
+        }
+        private void EndOperation()
+        {
+            operationClock = null; menuStrip1.Enabled = true;
+            if (assetBrowser != null && !assetBrowser.IsDisposed) assetBrowser.Enabled = true;
+            logger.DeferErrors = false;
+            if (logger.DeferredErrorCount > 0)
+                MessageBox.Show(this, $"{logger.DeferredErrorCount} errors were reported during the operation.\n\nFirst error:\n{logger.FirstDeferredError}", "Operation errors");
         }
 
         private void InitalizeOptions()
@@ -387,25 +422,36 @@ namespace AnimeStudio.GUI
 
         public async void LoadPaths(List<AssetFilterDataItem> filterData, params string[] paths)
         {
-            long totalSize = GetTotalSize(paths);
-            if (!SizeWarning(totalSize)) return;
+            try { await LoadPathsAsync(filterData, paths); }
+            catch (Exception e) { MessageBox.Show(this, e.ToString(), "Loading failed"); }
+        }
 
-            ResetForm();
-            assetsManager.SpecifyUnityVersion = specifyUnityVersion.Text;
-            assetsManager.Game = Studio.Game;
-            if (filterData != null)
+        internal async Task LoadPathsAsync(List<AssetFilterDataItem> filterData, params string[] paths)
+        {
+            if (operationClock != null) throw new InvalidOperationException("Another operation is already running.");
+            // A filtered map selection reads bundle offsets, not every byte in the
+            // containing blk files. Whole-file RAM estimates are misleading here.
+            bool boundedSelection = filterData?.Count > 0 && filterData.All(item => item.Offset >= 0);
+            if (!boundedSelection)
             {
-                assetsManager.FilterData = new AssetFilterData { Items = filterData };
+                long totalSize = GetTotalSize(paths);
+                if (!SizeWarning(totalSize)) return;
             }
-            if (paths.Length == 1 && Directory.Exists(paths[0]))
+            BeginOperation("Loading assets");
+            try
             {
-                await Task.Run(() => assetsManager.LoadFolder(paths[0]));
+                ResetForm();
+                assetsManager.SpecifyUnityVersion = specifyUnityVersion.Text;
+                assetsManager.Game = Studio.Game;
+                if (filterData != null)
+                    assetsManager.FilterData = new AssetFilterData { Items = filterData };
+                if (paths.Length == 1 && Directory.Exists(paths[0]))
+                    await Task.Run(() => assetsManager.LoadFolder(paths[0]));
+                else
+                    await Task.Run(() => assetsManager.LoadFiles(paths, mergeSplitAssets: !boundedSelection));
+                await BuildAssetStructures(paths);
             }
-            else
-            {
-                await Task.Run(() => assetsManager.LoadFiles(paths));
-            }
-            BuildAssetStructures(paths);
+            finally { EndOperation(); }
         }
 
         private async void loadFile_Click(object sender, EventArgs e)
@@ -423,7 +469,7 @@ namespace AnimeStudio.GUI
                     paths = File.ReadAllLines(paths[0]);
                 }
                 await Task.Run(() => assetsManager.LoadFiles(paths));
-                BuildAssetStructures(paths);
+                await BuildAssetStructures(paths);
             }
         }
 
@@ -442,7 +488,7 @@ namespace AnimeStudio.GUI
                 assetsManager.SpecifyUnityVersion = specifyUnityVersion.Text;
                 assetsManager.Game = Studio.Game;
                 await Task.Run(() => assetsManager.LoadFolder(openFolderDialog.Folder));
-                BuildAssetStructures(openFolderDialog.Folder);
+                await BuildAssetStructures(openFolderDialog.Folder);
             }
         }
 
@@ -479,7 +525,7 @@ namespace AnimeStudio.GUI
             }
         }
 
-        private async void BuildAssetStructures(params string[] sourcePaths)
+        private async Task BuildAssetStructures(params string[] sourcePaths)
         {
             if (assetsManager.assetsFileList.Count == 0)
             {
@@ -1783,31 +1829,12 @@ namespace AnimeStudio.GUI
 
         private void SetProgressBarValue(int value)
         {
-            if (value < 0) value = 0;
-            if (value > 100) value = 100;
-
-            if (InvokeRequired)
-            {
-                var result = BeginInvoke(new Action(() => { progressBar1.Value = value; }));
-                result.AsyncWaitHandle.WaitOne();
-            }
-            else
-            {
-                progressBar1.Value = value;
-            }
+            Volatile.Write(ref pendingProgress, Math.Clamp(value, 0, 100));
         }
 
         private void StatusStripUpdate(string statusText)
         {
-            if (InvokeRequired)
-            {
-                var result = BeginInvoke(() => { toolStripStatusLabel1.Text = statusText; });
-                result.AsyncWaitHandle.WaitOne();
-            }
-            else
-            {
-                toolStripStatusLabel1.Text = statusText;
-            }
+            Volatile.Write(ref pendingStatus, statusText);
         }
 
         public void ResetForm()
@@ -2712,9 +2739,10 @@ namespace AnimeStudio.GUI
             Properties.Settings.Default.Save();
 
             var handle = ConsoleHelper.GetConsoleWindow();
+            logger.WriteConsole = enableConsole.Checked;
             if (enableConsole.Checked)
             {
-                Logger.Default = new ConsoleLogger();
+                Logger.Default = logger;
                 ConsoleHelper.ShowWindow(handle, ConsoleHelper.SW_SHOW);
             }
             else

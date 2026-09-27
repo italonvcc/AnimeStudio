@@ -71,7 +71,6 @@ namespace AnimeStudio
                     var evidence = map.Where(e => e.Type == ClassIDType.MonoBehaviour && e.Name.StartsWith("EventPattern_", StringComparison.Ordinal) &&
                         Regex.IsMatch(e.Name, "(^|_)" + Regex.Escape(token) + "(_|$)")).ToArray();
                     if (effects.Length == 0) throw new InvalidDataException("No VFX roots were found for the selected character in the current client references.");
-                    if (effects.Length + evidence.Length > 128) throw new InvalidDataException("Character VFX selection exceeds the current 128-root bound.");
                     Load(manager, evidence);
                     var observed = evidence.SelectMany(e => Regex.Matches(System.Text.Encoding.ASCII.GetString(Get(manager, e).GetRawData()), @"[\x20-\x7e]{6,}").Select(m => m.Value)).ToHashSet();
                     JObject Selector(AssetEntry e, string why) => new() { ["name"] = e.Name, ["type"] = e.Type.ToString(), ["pathID"] = e.PathID.ToString(), ["source"] = e.Source, ["evidence"] = why };
@@ -95,7 +94,7 @@ namespace AnimeStudio
                     if (exported.Length == 0 || exported.Any(r => r["decodeError"]?.Type != JTokenType.Null && r["decodeError"] != null)) throw new InvalidDataException("Voice decoding was incomplete. See Voices/manifest.json.");
                     components.Add(new { kind = "Voices", exported = exported.Length, missing = result["results"].Count() - exported.Length });
                 }
-                progress?.Invoke("Sharing animation, material and texture dependencies");
+                progress?.Invoke("Organizing shared body animations; retaining character materials and textures");
                 GenshinSharedAssets.Package(destination, selected.Name);
                 File.WriteAllText(Path.Combine(destination, "character-export.json"), JsonConvert.SerializeObject(new { schemaVersion = 2, references.GameVersion, references.Fingerprint,
                     character = selected, options, animationSelection = "Character name prefix plus matching shared body action suffixes. Layer pairs are validated on Unity import.",
@@ -115,7 +114,7 @@ namespace AnimeStudio
             manager.FilterData.Items = list.Select(e => new AssetsManager.AssetFilterDataItem { Source = e.Source, Offset = e.Offset, Type = e.Type, PathID = e.PathID, Name = e.Name }).ToList();
             manager.LoadFiles(list.Select(e => e.Source).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), mergeSplitAssets: false);
         }
-        private static Object Get(AssetsManager manager, AssetEntry entry) => manager.assetsFileList.Where(f => f.originalPath != null && string.Equals(Path.GetFullPath(f.originalPath), Path.GetFullPath(entry.Source), StringComparison.OrdinalIgnoreCase) && f.offset == entry.Offset)
-            .SelectMany(f => f.Objects).SingleOrDefault(o => o.type == entry.Type && o.m_PathID == entry.PathID) ?? throw new InvalidDataException("Map selection did not load: " + entry.Name + ". Rebuild the map for the installed client.");
+        private static Object Get(AssetsManager manager, AssetEntry entry) => manager.FindAsset(entry)
+            ?? throw new InvalidDataException("Map selection did not load: " + entry.Name + ". Rebuild the map for the installed client.");
     }
 }

@@ -36,6 +36,18 @@ namespace AnimeStudio
         internal HashSet<string> importFilesHash = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         internal HashSet<string> noexistFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         internal HashSet<string> assetsFileListHash = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<(string, long), HashSet<string>> bundleFiles = new();
+
+        // A CAB can occur in both installed and patched blocks. Preserve the
+        // observed source/offset -> CAB identity even when its stream is reused.
+        public Object FindAsset(AssetEntry entry)
+        {
+            string source = Path.GetFullPath(entry.Source).ToUpperInvariant();
+            bundleFiles.TryGetValue((source, entry.Offset), out var names);
+            var files = assetsFileList.Where(f => names?.Contains(f.fileName) == true ||
+                (f.originalPath != null && Path.GetFullPath(f.originalPath).ToUpperInvariant() == source && f.offset == entry.Offset));
+            return files.Select(f => f.ObjectsDic.GetValueOrDefault(entry.PathID)).Where(o => o != null && o.type == entry.Type).SingleOrDefault();
+        }
 
         public class AssetFilterDataItem
         {
@@ -374,6 +386,11 @@ namespace AnimeStudio
 
         private void LoadAssetsFromMemory(FileReader reader, string originalPath, string unityVersion = null, long originalOffset = 0)
         {
+            if (!string.IsNullOrEmpty(originalPath)) {
+                var key = (Path.GetFullPath(originalPath).ToUpperInvariant(), originalOffset);
+                if (!bundleFiles.TryGetValue(key, out var names)) bundleFiles[key] = names = new(StringComparer.OrdinalIgnoreCase);
+                names.Add(reader.FileName);
+            }
             unityVersion = ResolveUnityVersionHint(originalPath, unityVersion);
             Logger.Verbose($"Loading asset file {reader.FileName} with version {unityVersion} from {originalPath} at offset 0x{originalOffset:X8}");
             if (!assetsFileListHash.Contains(reader.FileName))
@@ -796,6 +813,7 @@ namespace AnimeStudio
             resourceFileReaders.Clear();
 
             assetsFileIndexCache.Clear();
+            bundleFiles.Clear();
         }
 
         public void Clear()

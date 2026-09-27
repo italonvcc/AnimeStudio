@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Security.Cryptography;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using System.Text.RegularExpressions;
 
 namespace AnimeStudio
 {
@@ -22,7 +23,8 @@ namespace AnimeStudio
                 throw new ArgumentException("Invalid shared asset category.");
             string hash;
             using (var input = File.OpenRead(source)) hash = Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant();
-            string target = Path.Combine(Path.GetDirectoryName(root), "Generic", category, hash, Path.GetFileName(source));
+            string name = Regex.Replace(Path.GetFileNameWithoutExtension(source), @"_-?\d+$", "");
+            string target = Path.Combine(Path.GetDirectoryName(root), "Generic", category, name + "__" + hash[..12] + Path.GetExtension(source));
             Directory.CreateDirectory(Path.GetDirectoryName(target));
             // Never overwrite a pooled resource or its Unity .meta. Atomic creation
             // also permits simultaneous exports to reuse the same content.
@@ -65,10 +67,6 @@ namespace AnimeStudio
             }
             string body = character.Split('_')[1];
             ShareFolder("Animations", "Animations/" + body, "*.anim", name => name.StartsWith("Ani_Avatar_" + body + "_", StringComparison.Ordinal) && !name.StartsWith("Ani_" + character + "_", StringComparison.Ordinal));
-            ShareFolder("Textures", "Textures", "*.png");
-            ShareFolder("Materials", "Materials", "*.json", name => name != "shared-index.json");
-            ShareFolder("VFX/Texture2D", "Textures", "*.png");
-            ShareFolder("VFX/Material", "Materials", "*.json", name => name != "shared-index.json");
 
             string manifestPath = Path.Combine(directory, "manifest.json");
             var manifest = JObject.Parse(File.ReadAllText(manifestPath));
@@ -81,24 +79,14 @@ namespace AnimeStudio
             var recipe = JObject.Parse(File.ReadAllText(recipePath));
             foreach (var clip in recipe["clips"])
                 if (links.TryGetValue((string)clip["file"], out string shared)) clip["file"] = shared;
-            recipe["textures"] = new JArray(links.Where(p => p.Key.StartsWith("Textures/", StringComparison.Ordinal))
-                .Select(p => new JObject { ["name"] = Path.GetFileName(p.Key), ["file"] = p.Value }));
+            string textures = Path.Combine(directory, "Textures");
+            recipe["textures"] = new JArray((Directory.Exists(textures) ? Directory.GetFiles(textures, "*.png") : Array.Empty<string>())
+                .Select(p => new JObject { ["name"] = Path.GetFileName(p), ["file"] = "Textures/" + Path.GetFileName(p) }));
             recipe["previewMaterials"] = manifest["previewMaterials"]?.DeepClone() ?? new JArray();
             File.WriteAllText(recipePath, recipe.ToString(Formatting.Indented));
 
-            string vfxPath = Path.Combine(directory, "VFX", "manifest.json");
-            if (File.Exists(vfxPath))
-            {
-                var vfx = JObject.Parse(File.ReadAllText(vfxPath));
-                foreach (var property in vfx.Descendants().OfType<JProperty>().Where(p => p.Name == "file" && p.Value.Type == JTokenType.String).ToArray())
-                {
-                    string old = ((string)property.Value).Replace('\\', '/');
-                    if (links.TryGetValue("VFX/" + old, out string shared)) property.Value = "../" + shared;
-                }
-                File.WriteAllText(vfxPath, vfx.ToString(Formatting.Indented));
-            }
             File.WriteAllText(Path.Combine(directory, "shared-assets.json"), JsonConvert.SerializeObject(new {
-                schemaVersion = 1, identity = "SHA-256 of exact exported bytes plus original filename; textures are preview PNG data, materials retain full source JSON.",
+                schemaVersion = 2, identity = "Readable animation name with 12-digit SHA-256 suffix; full byte hash verified before reuse. Materials and textures stay in the character package.",
                 meaning = "Reusable dependency storage; placement does not assert universal character compatibility.", assets = records }, Formatting.Indented));
             // All references are written before removing the just-created local copies.
             foreach (string original in links.Keys) File.Delete(Path.Combine(directory, original));

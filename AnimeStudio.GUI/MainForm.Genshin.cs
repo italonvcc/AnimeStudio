@@ -46,7 +46,7 @@ namespace AnimeStudio.GUI
             characterMapPath = path; characterMapEntries = entries.ToList(); characterReferences = null;
             if (!Studio.Game.Type.IsGI() || !ResourceMap.GetGameType().IsGI()) return;
             characterExportButton.Enabled = false;
-            Enabled = false;
+            BeginOperation("Preparing character references");
             try
             {
                 var snapshot = characterMapEntries;
@@ -55,7 +55,7 @@ namespace AnimeStudio.GUI
                 CharacterProgress("Genshin references ready. Select one Animator, then My tools > Genshin character.");
             }
             catch (Exception e) { Logger.Error(e.ToString()); MessageBox.Show(this, e.Message, "Genshin reference refresh failed"); }
-            finally { Enabled = true; }
+            finally { EndOperation(); }
         }
         internal void ClearGenshinReferences() { characterReferences = null; characterMapEntries = null; characterMapPath = null; }
         private AssetEntry SelectedCharacter()
@@ -72,7 +72,7 @@ namespace AnimeStudio.GUI
         private void CharacterProgress(string message)
         {
             Logger.Info(message);
-            if (!IsDisposed && IsHandleCreated) BeginInvoke(() => Studio.StatusStripUpdate(message));
+            StatusStripUpdate(message);
         }
         private async void ExportCharacter(object sender, EventArgs args)
         {
@@ -83,19 +83,19 @@ namespace AnimeStudio.GUI
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
             string name = string.Concat(selected.Name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
             string destination = Path.Combine(dialog.SelectedPath, name);
-            characterExportBusy = true; Enabled = false;
-            if (assetBrowser != null && !assetBrowser.IsDisposed) assetBrowser.Enabled = false;
+            characterExportBusy = true; BeginOperation("Exporting " + selected.Name);
             try
             {
                 var references = await characterReferences;
                 await Task.Run(() => GenshinCharacterExporter.Export(references, selected, destination, options, CharacterProgress));
-                MessageBox.Show(this, "Character exported to:\n" + destination + "\n\nCopy the entire folder under Assets in Unity. Its importer creates the character prefab, Avatar and animation controller automatically.", "Character export complete");
+                operationClock.Stop();
+                CharacterProgress("Export complete: " + destination);
+                MessageBox.Show(this, "Character exported to:\n" + destination + "\n\nCopy this character folder and its sibling Generic folder under the same parent in Unity Assets. Its importer creates the character prefab, Avatar and animation controller automatically.", "Character export complete");
             }
             catch (Exception e) { Logger.Error(e.ToString()); MessageBox.Show(this, e.Message + "\nAny partial output is marked EXPORT-INCOMPLETE.txt.", "Character export failed"); }
             finally
             {
-                characterExportBusy = false; Enabled = true;
-                if (assetBrowser != null && !assetBrowser.IsDisposed) assetBrowser.Enabled = true;
+                characterExportBusy = false; EndOperation();
             }
         }
     }

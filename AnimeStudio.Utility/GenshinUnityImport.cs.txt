@@ -78,6 +78,10 @@ public class AnimeStudioCharacterImport : AssetPostprocessor
             var model = AssetDatabase.LoadAssetAtPath<GameObject>(folder + "/" + recipe.model);
             if (model == null) throw new Exception("Model has not imported: " + recipe.model);
             instance = UnityEngine.Object.Instantiate(model); instance.name = recipe.character;
+            // Avatar calibration and the mesh's bind pose serve different purposes.
+            // Preserve the imported model pose while building the humanoid mapping.
+            var modelPose = instance.GetComponentsInChildren<Transform>(true).Select(t => new {
+                transform = t, position = t.localPosition, rotation = t.localRotation, scale = t.localScale }).ToArray();
             var transforms = new Transform[recipe.nodes.Length];
             for (int i = 0; i < transforms.Length; i++)
             {
@@ -158,6 +162,11 @@ public class AnimeStudioCharacterImport : AssetPostprocessor
             }
             if (defaultState != null) machine.defaultState = defaultState;
             animator.runtimeAnimatorController = controller;
+            foreach (var pose in modelPose) {
+                pose.transform.localPosition = pose.position;
+                pose.transform.localRotation = pose.rotation;
+                pose.transform.localScale = pose.scale;
+            }
             string prefab = folder + "/" + recipe.character + ".prefab";
             PrefabUtility.SaveAsPrefabAsset(instance, prefab); AssetDatabase.SaveAssets();
             File.WriteAllText(reportFile, JsonUtility.ToJson(new Report { success = true, prefab = prefab, humanScale = animator.humanScale,
