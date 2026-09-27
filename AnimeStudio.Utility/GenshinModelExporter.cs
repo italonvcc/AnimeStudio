@@ -10,7 +10,7 @@ namespace AnimeStudio
     public static class GenshinModelExporter
     {
         public static string Export(AssetsManager manager, IEnumerable<AssetEntry> map, Object root,
-            string destination, AnimationClip[] clips = null, IReadOnlyList<GenshinPartReplacement> replacements = null, bool exportMaterials = true)
+            string destination, AnimationClip[] clips = null, IReadOnlyList<GenshinPartReplacement> replacements = null, bool exportMaterials = true, bool compactAnimations = false)
         {
             if (!manager.Game.Type.IsGI()) throw new ArgumentException("Select Genshin Impact before exporting.");
             if (root is not (Animator or GameObject)) throw new ArgumentException("Select an Animator or GameObject root.");
@@ -59,7 +59,8 @@ namespace AnimeStudio
                 foreach (var clip in clips)
                 {
                     var file = SafeName(clip.Name) + "_" + clip.m_PathID + ".anim";
-                    File.WriteAllText(Path.Combine(animationDirectory, file), clip.Convert());
+                    string yaml = clip.Convert(reduceConstantKeys: compactAnimations);
+                    File.WriteAllText(Path.Combine(animationDirectory, file), compactAnimations ? GenshinAnimationText.Compact(yaml) : yaml);
                     var humanoid = clip.m_ClipBindingConstant?.genericBindings.Count(b => b.typeID == ClassIDType.Animator && b.customType == 8) ?? 0;
                     sourceClips.Add(new { source = Identity(clip), file = "Animations/" + file, humanoidBindings = humanoid,
                         sampleRate = clip.m_SampleRate, startTime = clip.m_MuscleClip?.m_StartTime, stopTime = clip.m_MuscleClip?.m_StopTime,
@@ -86,6 +87,9 @@ namespace AnimeStudio
                 meshes = converted.MeshList.Select(m => new { m.Path, vertices = m.VertexList.Count, bones = m.BoneList?.Count }),
                 clips = converted.AnimationList.Select(a => new { a.Name, a.SampleRate, tracks = a.TrackList.Count }),
                 sourceClips, assembly,
+                animationStorage = compactAnimations ? "Wholly constant curves reduced to endpoints and compact YAML; moving curves and humanoid root/IK component keys preserved. No resampling or tolerance-based compression." : "Decoded source curves",
+                previewMaterials = converted.MaterialList.Select(m => new { name = m.Name, textures = m.Textures.Select(t => new { name = t.Name, destination = t.Dest,
+                    offset = new { x = t.Offset.X, y = t.Offset.Y }, scale = new { x = t.Scale.X, y = t.Scale.Y } }) }),
                 objects = dependencies.Objects.Select(Identity)
             };
             File.WriteAllText(Path.Combine(destination, "manifest.json"), JsonConvert.SerializeObject(manifest, Formatting.Indented, settings));

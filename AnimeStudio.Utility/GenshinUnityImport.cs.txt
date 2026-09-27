@@ -14,13 +14,16 @@ public class AnimeStudioCharacterImport : AssetPostprocessor
     [Serializable] public class Axes { public Vector3 min, max; public float length; }
     [Serializable] public class Node { public string path, name, human; public int parent; public Vector3 position, scale; public Quaternion rotation; public Axes axes; }
     [Serializable] public class Clip { public string name, file; public bool body; public float duration, rate; }
-    [Serializable] public class Recipe { public string character, model; public Node[] nodes; public Clip[] clips; public float humanScale, armTwist, foreArmTwist, upperLegTwist, legTwist, armStretch, legStretch, feetSpacing; public bool hasTranslationDoF; }
-    [Serializable] public class Report { public bool success; public string error, prefab; public float humanScale; public int clips, meshes; public string[] missingCurvePaths; }
+    [Serializable] public class TextureFile { public string name, file; }
+    [Serializable] public class MaterialTexture { public string name; public int destination; public Vector2 offset, scale; }
+    [Serializable] public class PreviewMaterial { public string name; public MaterialTexture[] textures; }
+    [Serializable] public class Recipe { public string character, model; public Node[] nodes; public Clip[] clips; public TextureFile[] textures; public PreviewMaterial[] previewMaterials; public float humanScale, armTwist, foreArmTwist, upperLegTwist, legTwist, armStretch, legStretch, feetSpacing; public bool hasTranslationDoF; }
+    [Serializable] public class Report { public bool success; public string error, prefab; public float humanScale; public int clips, meshes, composedPairs, textureAssignments; public string[] missingCurvePaths; }
     static bool scheduled, running;
     static AnimeStudioCharacterImport() { Schedule(); }
     static void OnPostprocessAllAssets(string[] imported, string[] deleted, string[] moved, string[] old)
     {
-        if (imported.Any(p => p.EndsWith(".character.json") || p.EndsWith(".fbx") || p.EndsWith(".anim"))) Schedule();
+        if (imported.Concat(deleted).Concat(moved).Any(p => p.EndsWith(".character.json") || p.EndsWith(".fbx") || p.EndsWith(".anim") || p.EndsWith(".png"))) Schedule();
     }
     static void Schedule() { if (scheduled || running) return; scheduled = true; EditorApplication.delayCall += Run; }
     public static void Run()
@@ -41,23 +44,37 @@ public class AnimeStudioCharacterImport : AssetPostprocessor
         }
         finally { running = false; }
     }
+    static string Resolve(string folder, string relative)
+    {
+        string full = Path.GetFullPath(Path.Combine(folder, relative));
+        string assets = Path.GetFullPath("Assets") + Path.DirectorySeparatorChar;
+        if (!full.StartsWith(assets, StringComparison.OrdinalIgnoreCase)) throw new Exception("Resource is outside Assets: " + relative);
+        return "Assets/" + full.Substring(assets.Length).Replace('\\', '/');
+    }
     static void Import(string path)
     {
         string folder = Path.GetDirectoryName(path).Replace('\\', '/');
         string reportFile = folder + "/unity-import-report.json";
         string stampFile = "Library/AnimeStudio/" + AssetDatabase.AssetPathToGUID(path) + ".txt";
         var recipe = JsonUtility.FromJson<Recipe>(File.ReadAllText(path));
-        string signature;
-        using (var hash = SHA256.Create())
-        {
-            string stamp = "native-import-v2" + File.ReadAllText(path) + File.GetLastWriteTimeUtc(folder + "/" + recipe.model).Ticks;
-            foreach (var clip in recipe.clips) stamp += File.GetLastWriteTimeUtc(folder + "/" + clip.file).Ticks.ToString();
-            signature = BitConverter.ToString(hash.ComputeHash(System.Text.Encoding.UTF8.GetBytes(stamp)));
-        }
-        if (File.Exists(stampFile) && File.ReadAllText(stampFile) == signature && File.Exists(reportFile)) return;
         GameObject instance = null;
         try
         {
+            string signature;
+            using (var hash = SHA256.Create())
+            {
+                string stamp = "native-compositions-v4" + File.ReadAllText(path) + File.ReadAllText(folder + "/Editor/" + typeof(AnimeStudioCharacterImport).Name + ".cs");
+                var files = recipe.clips.Select(c => c.file).Concat((recipe.textures ?? new TextureFile[0]).Select(t => t.file)).Prepend(recipe.model);
+                foreach (string file in files)
+                {
+                    string resource = Resolve(folder, file);
+                    if (!File.Exists(resource)) throw new Exception("Missing shared dependency; import the sibling Generic folder too: " + resource);
+                    stamp += "|" + resource + ":" + AssetDatabase.GetAssetDependencyHash(resource);
+                }
+                signature = BitConverter.ToString(hash.ComputeHash(System.Text.Encoding.UTF8.GetBytes(stamp)));
+            }
+            if (File.Exists(stampFile) && File.ReadAllText(stampFile) == signature && File.Exists(reportFile) &&
+                File.Exists(folder + "/" + recipe.character + ".prefab") && File.Exists(folder + "/Rig/Character.controller") && File.Exists(folder + "/Rig/CharacterAvatar.asset")) return;
             var model = AssetDatabase.LoadAssetAtPath<GameObject>(folder + "/" + recipe.model);
             if (model == null) throw new Exception("Model has not imported: " + recipe.model);
             instance = UnityEngine.Object.Instantiate(model); instance.name = recipe.character;
@@ -90,6 +107,7 @@ public class AnimeStudioCharacterImport : AssetPostprocessor
             var avatar = AvatarBuilder.BuildHumanAvatar(instance, description);
             if (!avatar.isValid || !avatar.isHuman || Mathf.Abs(avatar.humanDescription.armStretch - recipe.armStretch) > .001f) throw new Exception("Source Avatar reconstruction failed.");
             string rigFolder = folder + "/Rig"; Directory.CreateDirectory(rigFolder); AssetDatabase.Refresh();
+            int textureAssignments = BindTextures(instance, recipe, folder, rigFolder);
             string avatarPath = rigFolder + "/CharacterAvatar.asset";
             var savedAvatar = AssetDatabase.LoadAssetAtPath<Avatar>(avatarPath);
             if (savedAvatar == null) { avatar.name = recipe.character; AssetDatabase.CreateAsset(avatar, avatarPath); savedAvatar = avatar; }
@@ -101,15 +119,19 @@ public class AnimeStudioCharacterImport : AssetPostprocessor
             string controllerPath = rigFolder + "/Character.controller";
             var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(controllerPath);
             if (controller == null) controller = AnimatorController.CreateAnimatorControllerAtPath(controllerPath);
-            if (controller.layers.Length == 0) controller.AddLayer("Base Layer");
+            // This controller is generated. Rebuild its subassets on dependency changes.
+            controller.layers = new AnimatorControllerLayer[0];
+            foreach (var asset in AssetDatabase.LoadAllAssetsAtPath(controllerPath))
+                if (asset != controller) UnityEngine.Object.DestroyImmediate(asset, true);
+            controller.AddLayer("Base Layer");
             var machine = controller.layers[0].stateMachine;
-            foreach (var state in machine.states) machine.RemoveState(state.state);
-            var missing = new HashSet<string>(); int count = 0; AnimatorState defaultState = null;
+            var missing = new HashSet<string>(); int count = 0, composedPairs = 0; AnimatorState defaultState = null;
             foreach (var info in recipe.clips)
             {
-                var clip = AssetDatabase.LoadAssetAtPath<AnimationClip>(folder + "/" + info.file);
+                var clip = AssetDatabase.LoadAssetAtPath<AnimationClip>(Resolve(folder, info.file));
                 if (clip == null) throw new Exception("Animation has not imported: " + info.file);
                 if (Mathf.Abs(clip.length - info.duration) > .002f) throw new Exception("Unexpected clip duration: " + info.name);
+                var state = machine.AddState(info.name); state.writeDefaultValues = true;
                 // Pair secondary-only tracks with the same named shared body action when duration/rate agree.
                 if (!info.body)
                 {
@@ -119,41 +141,67 @@ public class AnimeStudioCharacterImport : AssetPostprocessor
                     var bodies = info.name.StartsWith(prefix) ? recipe.clips.Where(c => c.body && c.name == shared + info.name.Substring(prefix.Length) && Mathf.Abs(c.duration-info.duration)<.0001f && Mathf.Abs(c.rate-info.rate)<.0001f).ToArray() : new Clip[0];
                     if (bodies.Length == 1)
                     {
-                        var body = AssetDatabase.LoadAssetAtPath<AnimationClip>(folder + "/" + bodies[0].file);
-                        var combined = new AnimationClip { name = info.name + "__WithBody", frameRate = info.rate };
-                        var curves = new Dictionary<EditorCurveBinding, AnimationCurve>();
-                        foreach (var input in new[] { body, clip })
-                        foreach (var binding in AnimationUtility.GetCurveBindings(input)) curves[binding] = AnimationUtility.GetEditorCurve(input, binding);
-                        AnimationUtility.SetEditorCurves(combined, curves.Keys.ToArray(), curves.Values.ToArray());
-                        var objectCurves = new Dictionary<EditorCurveBinding, ObjectReferenceKeyframe[]>();
-                        foreach (var input in new[] { body, clip })
-                        foreach (var binding in AnimationUtility.GetObjectReferenceCurveBindings(input)) objectCurves[binding] = AnimationUtility.GetObjectReferenceCurve(input, binding);
-                        foreach (var pair in objectCurves) AnimationUtility.SetObjectReferenceCurve(combined, pair.Key, pair.Value);
-                        AnimationUtility.SetAnimationEvents(combined, AnimationUtility.GetAnimationEvents(body).Concat(AnimationUtility.GetAnimationEvents(clip)).OrderBy(e => e.time).ToArray());
-                        AnimationUtility.SetAnimationClipSettings(combined, AnimationUtility.GetAnimationClipSettings(body));
-                        string combinedPath = rigFolder + "/" + Path.GetFileNameWithoutExtension(info.file) + "__WithBody.anim";
-                        var existing = AssetDatabase.LoadAssetAtPath<AnimationClip>(combinedPath);
-                        if (existing == null) AssetDatabase.CreateAsset(combined, combinedPath);
-                        else { EditorUtility.CopySerialized(combined, existing); UnityEngine.Object.DestroyImmediate(combined); combined = existing; }
-                        combined.name = info.name + "__WithBody"; EditorUtility.SetDirty(combined);
-                        clip = combined;
+                        string composition = rigFolder + "/" + Path.GetFileNameWithoutExtension(info.file) + ".genshinclip";
+                        string json = JsonUtility.ToJson(new AnimeStudioClipCompositionImport.Recipe { name = info.name + "__WithBody",
+                            body = "../" + bodies[0].file, secondary = "../" + info.file }, true);
+                        if (!File.Exists(composition) || File.ReadAllText(composition) != json) File.WriteAllText(composition,json);
+                        AssetDatabase.ImportAsset(composition,ImportAssetOptions.ForceSynchronousImport);
+                        clip = AssetDatabase.LoadAssetAtPath<AnimationClip>(composition);
+                        if (clip == null) throw new Exception("Composition did not import: " + composition);
+                        composedPairs++;
                     }
                 }
                 foreach (var binding in AnimationUtility.GetCurveBindings(clip))
                     if (binding.type == typeof(Transform) && binding.path.Length > 0 && instance.transform.Find(binding.path) == null) missing.Add(binding.path);
-                var state = machine.AddState(clip.name); state.motion = clip; count++;
-                if (clip.isHumanMotion && (defaultState == null || clip.name.EndsWith("Standby__WithBody"))) defaultState = state;
+                state.motion = clip; count++;
+                if (clip.isHumanMotion && (defaultState == null || info.name == "Ani_" + recipe.character + "_Standby")) defaultState = state;
             }
             if (defaultState != null) machine.defaultState = defaultState;
             animator.runtimeAnimatorController = controller;
             string prefab = folder + "/" + recipe.character + ".prefab";
             PrefabUtility.SaveAsPrefabAsset(instance, prefab); AssetDatabase.SaveAssets();
             File.WriteAllText(reportFile, JsonUtility.ToJson(new Report { success = true, prefab = prefab, humanScale = animator.humanScale,
-                clips = count, meshes = instance.GetComponentsInChildren<Renderer>(true).Length, missingCurvePaths = missing.ToArray() }, true));
+                clips = count, meshes = instance.GetComponentsInChildren<Renderer>(true).Length, composedPairs = composedPairs, textureAssignments = textureAssignments, missingCurvePaths = missing.ToArray() }, true));
             Directory.CreateDirectory(Path.GetDirectoryName(stampFile)); File.WriteAllText(stampFile, signature);
             Debug.Log("AnimeStudio character ready: " + prefab);
         }
         catch (Exception e) { File.WriteAllText(reportFile, JsonUtility.ToJson(new Report { success = false, error = e.ToString() }, true)); Debug.LogException(e); }
         finally { if (instance != null) UnityEngine.Object.DestroyImmediate(instance); }
+    }
+    static int BindTextures(GameObject instance, Recipe recipe, string folder, string rigFolder)
+    {
+        var files = (recipe.textures ?? new TextureFile[0]).ToDictionary(t => t.name, t => t.file);
+        var definitions = (recipe.previewMaterials ?? new PreviewMaterial[0]).ToDictionary(m => m.name);
+        var materials = new Dictionary<Material, Material>(); int assignments = 0;
+        foreach (var renderer in instance.GetComponentsInChildren<Renderer>(true))
+        {
+            var slots = renderer.sharedMaterials;
+            for (int i = 0; i < slots.Length; i++)
+            {
+                var original = slots[i];
+                if (original == null || !definitions.TryGetValue(original.name, out var definition)) continue;
+                if (!materials.TryGetValue(original, out var material))
+                {
+                    material = new Material(original);
+                    foreach (var texture in definition.textures)
+                    {
+                        string property = texture.destination == 0 ? "_MainTex" : texture.destination == 1 || texture.destination == 3 ? "_BumpMap" : texture.destination == 2 ? "_SpecGlossMap" : null;
+                        if (property == null || !material.HasProperty(property)) continue;
+                        if (!files.TryGetValue(texture.name, out var file)) throw new Exception("Missing texture assignment: " + texture.name);
+                        var asset = AssetDatabase.LoadAssetAtPath<Texture2D>(Resolve(folder, file));
+                        if (asset == null) throw new Exception("Texture has not imported: " + file);
+                        material.SetTexture(property, asset); material.SetTextureOffset(property, texture.offset); material.SetTextureScale(property, texture.scale); assignments++;
+                    }
+                    string target = rigFolder + "/PreviewMaterial_" + materials.Count + ".mat";
+                    var saved = AssetDatabase.LoadAssetAtPath<Material>(target);
+                    if (saved == null) AssetDatabase.CreateAsset(material, target);
+                    else { EditorUtility.CopySerialized(material, saved); UnityEngine.Object.DestroyImmediate(material); material = saved; }
+                    materials.Add(original, material);
+                }
+                slots[i] = material;
+            }
+            renderer.sharedMaterials = slots;
+        }
+        return assignments;
     }
 }

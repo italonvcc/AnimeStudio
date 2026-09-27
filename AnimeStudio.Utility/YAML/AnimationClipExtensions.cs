@@ -142,7 +142,7 @@ namespace AnimeStudio
                 return false;
             }
         }
-        public static string Convert(this AnimationClip clip)
+        public static string Convert(this AnimationClip clip, bool reduceConstantKeys = false)
         {
             if (!clip.m_Legacy || clip.m_MuscleClip != null)
             {
@@ -154,6 +154,7 @@ namespace AnimeStudio
                 clip.m_FloatCurves = converter.Floats.Union(clip.m_FloatCurves).ToList();
                 clip.m_PPtrCurves = converter.PPtrs.Union(clip.m_PPtrCurves).ToList();
             }
+            if (reduceConstantKeys) GenshinConstantCurveReduction.Apply(clip);
             return ConvertSerializedAnimationClip(clip);
         }
         public static string ConvertSerializedAnimationClip(AnimationClip animationClip)

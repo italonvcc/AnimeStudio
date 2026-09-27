@@ -42,7 +42,15 @@ namespace AnimeStudio
             using var reader = new StreamReader(stream ?? throw new InvalidOperationException("Missing Unity importer resource."));
             string importer = "AnimeStudioCharacterImport_" + Guid.NewGuid().ToString("N");
             File.WriteAllText(Path.Combine(directory, "Editor", importer + ".cs"), reader.ReadToEnd().Replace("AnimeStudioCharacterImport", importer));
-            File.WriteAllText(Path.Combine(directory, "UNITY-IMPORT.txt"), "Copy this entire folder under Assets in a Unity project. After script compilation, the included editor importer creates a Humanoid Avatar, Animator Controller and character prefab. No animation baking or external Unity process is used by AnimeStudio. See unity-import-report.json after import. Original .anim clips remain editable. Materials are previews; Genshin shaders/VFX simulation are not recreated.\n");
+            string sharedEditor = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(directory)), "Generic", "Editor");
+            Directory.CreateDirectory(sharedEditor);
+            using var compositionStream = typeof(GenshinUnityPackage).Assembly.GetManifestResourceStream("AnimeStudio.GenshinClipCompositionImport.cs");
+            using var compositionReader = new StreamReader(compositionStream ?? throw new InvalidOperationException("Missing composition importer resource."));
+            string source = compositionReader.ReadToEnd(), compositionPath = Path.Combine(sharedEditor, "AnimeStudioClipCompositionImport.cs");
+            if (File.Exists(compositionPath) && File.ReadAllText(compositionPath) != source)
+                throw new IOException("The output parent contains a different composition importer version. Choose a new parent folder.");
+            if (!File.Exists(compositionPath)) File.WriteAllText(compositionPath, source);
+            File.WriteAllText(Path.Combine(directory, "UNITY-IMPORT.txt"), "Copy this character folder AND its sibling Generic folder under the same parent in Unity Assets. Keep Generic resources and existing .meta files when adding characters. Include Generic/Editor only once per project. The importer creates a Humanoid Avatar, Animator Controller and character prefab. Paired actions use small Rig/*.genshinclip recipes; Unity generates combined clips in Library rather than extra exported .anim files. See unity-import-report.json. Materials are previews; Genshin shaders/VFX simulation are not recreated. Textures and material JSON are stored once in the reusable Generic pool; character assignments remain in the recipe/manifests.\n");
         }
         public static bool HasBody(AnimationClip c) => c.m_ClipBindingConstant?.genericBindings.Any(b => b.typeID == ClassIDType.Animator && b.customType == 8 && b.attribute >= 42 && b.attribute < 137) == true;
         private static string Safe(string s) => string.Concat(s.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));

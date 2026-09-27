@@ -49,7 +49,7 @@ namespace AnimeStudio
                 var animations = clips.Select(e => Get(manager, e) as AnimationClip ?? throw new InvalidDataException("Animation did not load: " + e.Name))
                     .DistinctBy(c => (c.Name, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(c.GetRawData())))).ToArray();
                 progress?.Invoke("Exporting character model, textures and source rig");
-                string fbx = GenshinModelExporter.Export(manager, map, animator, destination, animations, exportMaterials: options.Materials);
+                string fbx = GenshinModelExporter.Export(manager, map, animator, destination, animations, exportMaterials: options.Materials, compactAnimations: true);
                 if (!animator.m_Avatar.TryGet(out var avatar)) throw new InvalidDataException("Selected Animator has no usable humanoid Avatar.");
                 GenshinUnityPackage.Write(avatar, selected.Name, fbx, animations, destination);
                 // Unity resolves textures from a child Textures directory during FBX import.
@@ -95,9 +95,11 @@ namespace AnimeStudio
                     if (exported.Length == 0 || exported.Any(r => r["decodeError"]?.Type != JTokenType.Null && r["decodeError"] != null)) throw new InvalidDataException("Voice decoding was incomplete. See Voices/manifest.json.");
                     components.Add(new { kind = "Voices", exported = exported.Length, missing = result["results"].Count() - exported.Length });
                 }
-                File.WriteAllText(Path.Combine(destination, "character-export.json"), JsonConvert.SerializeObject(new { schemaVersion = 1, references.GameVersion, references.Fingerprint,
+                progress?.Invoke("Sharing animation, material and texture dependencies");
+                GenshinSharedAssets.Package(destination, selected.Name);
+                File.WriteAllText(Path.Combine(destination, "character-export.json"), JsonConvert.SerializeObject(new { schemaVersion = 2, references.GameVersion, references.Fingerprint,
                     character = selected, options, animationSelection = "Character name prefix plus matching shared body action suffixes. Layer pairs are validated on Unity import.",
-                    components, status = "Exported; copy this folder under Unity Assets for automatic prefab setup." }, Formatting.Indented));
+                    components, status = "Exported; copy this character folder AND its sibling Generic folder under the same Unity Assets parent." }, Formatting.Indented));
                 return destination;
             }
             catch (Exception e)
