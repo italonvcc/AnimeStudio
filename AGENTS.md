@@ -9,6 +9,7 @@
 - AnimeStudio owns production extraction, file parsing, dependency resolution, model/animation/material/audio/VFX export, and the GUI/CLI controls for them.
 - Put research notes, long-form project documentation, external tools, and analysis scripts in sibling `genshin_asset_study`. Consult its README.md and docs/phase-1.md for scope and acceptance criteria.
 - Phase 1: Wonderland Manekin parts; complete character animation; named character voices/combat sounds; per-character VFX; resolved shader identity in materials.
+- Retain both animation export formats: Unity `.anim` with source humanoid curves and FBX with rig animation. Improvements to either format must not remove the other.
 - Surface implemented game-specific export actions based on the selected game (Genshin first), while retaining shared behavior for other games. Do not present unfinished research as a working exporter.
 - Phase 2 Unity scenes/shader recreation are deferred until Phase 1 is complete and the user supplies the Unity project.
 
