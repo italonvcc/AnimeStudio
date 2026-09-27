@@ -10,9 +10,9 @@ namespace AnimeStudio.CLI
     {
         public static int Run(string[] args)
         {
-            if (args.Length is < 4 or > 9 || (args.Length > 5 && (args.Length is not (7 or 9) || args[5] != "--unity-editor")) || (args.Length == 9 && args[7] != "--layers"))
+            if (args.Length is < 4 or > 5)
             {
-                Console.Error.WriteLine("Usage: --genshin-model <map.map|json> <AnimatorName[@PathID]> <new-output-directory> [clip-name-regex [--unity-editor <Unity.exe> [--layers <bodyPathID:secondaryPathID,...>]]]");
+                Console.Error.WriteLine("Usage: --genshin-model <map> <AnimatorName[@PathID]> <new-output-directory> [clip-name-regex]. FBX animation baking has been removed; animations export as .anim.");
                 return 2;
             }
             var manager = new AssetsManager { Game = GameManager.GetGameByType(GameType.GI) };
@@ -64,8 +64,7 @@ namespace AnimeStudio.CLI
                 var animations = objects.OfType<AnimationClip>().Where(c => selected.Any(e => e.Type == ClassIDType.AnimationClip &&
                     e.PathID == c.m_PathID && string.Equals(e.Source, c.assetsFile.originalPath, StringComparison.OrdinalIgnoreCase))).ToArray();
                 if (animations.Length != selected.Count - 1) throw new InvalidDataException("Some selected clips did not load.");
-                var layers = args.Length == 9 ? args[8].Split(',').Select(p => p.Split(':')).ToDictionary(p => long.Parse(p[0]), p => long.Parse(p[1])) : null;
-                var result = GenshinModelExporter.Export(manager, map, root, args[3], animations, args.Length >= 7 ? args[6] : null, layers);
+                var result = GenshinModelExporter.Export(manager, map, root, args[3], animations);
                 Console.WriteLine(result);
                 return 0;
             }

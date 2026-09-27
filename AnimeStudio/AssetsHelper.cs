@@ -397,6 +397,41 @@ namespace AnimeStudio
             finally { assetsManager.Clear(); }
         }
 
+        // Supplemental discovery ignores display/export flags: a hidden prefab is still a dependency.
+        public static List<AssetEntry> IndexGenshinReferences(string[] files)
+        {
+            if (files.Length is < 1 or > 64) throw new ArgumentException("Index 1–64 source files at a time.");
+            var result = new List<AssetEntry>();
+            var game = GameManager.GetGameByType(GameType.GI);
+            assetsManager.Game = game;
+            try
+            {
+                ForEachLoadedBundle(files, file =>
+                {
+                    foreach (var serialized in assetsManager.assetsFileList)
+                    foreach (var info in serialized.m_Objects)
+                    {
+                        var reader = new ObjectReader(serialized.reader, serialized, info, game);
+                        if (reader.type is not (ClassIDType.GameObject or ClassIDType.MonoBehaviour or ClassIDType.Mesh or ClassIDType.Shader or ClassIDType.Cubemap)) continue;
+                        string name = reader.type switch
+                        {
+                            ClassIDType.GameObject => new GameObject(reader).Name,
+                            ClassIDType.MonoBehaviour => new MonoBehaviour(reader).Name,
+                            _ => new ReferenceName(reader).Name
+                        };
+                        if (reader.type == ClassIDType.GameObject && !name.StartsWith("Eff_", StringComparison.Ordinal) && !name.StartsWith("SkillObj_", StringComparison.Ordinal)) continue;
+                        if (reader.type == ClassIDType.MonoBehaviour && !name.StartsWith("EventPattern_", StringComparison.Ordinal)) continue;
+                        result.Add(new AssetEntry { Source = Path.GetFullPath(file), Offset = serialized.offset, Type = reader.type,
+                            PathID = reader.m_PathID, Name = name, Container = "", Hash = "" });
+                    }
+                }, mergeSplitAssets: false);
+                return result;
+            }
+            finally { assetsManager.Clear(); }
+        }
+
+        private sealed class ReferenceName : NamedObject { public ReferenceName(ObjectReader reader) : base(reader) { } }
+
         public static async Task BuildAssetMap(string[] files, string mapName, Game game, string savePath, ExportListType exportListType, ClassIDType[] typeFilters = null, Regex[] nameFilters = null, Regex[] containerFilters = null, bool mergeSplitAssets = true)
         {
             Logger.Info("Building AssetMap...");

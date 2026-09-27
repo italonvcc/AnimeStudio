@@ -47,6 +47,7 @@ namespace AnimeStudio.GUI
             var openFileDialog = new OpenFileDialog() { Multiselect = false, Filter = "MessagePack AssetMap File|*.map|JSON AssetMap File|*.json" };
             if (openFileDialog.ShowDialog(this) == DialogResult.OK)
             {
+                Enabled = false;
                 try
                 {
                     var path = openFileDialog.FileName;
@@ -64,11 +65,13 @@ namespace AnimeStudio.GUI
                     _firstAssetEntries.AddRange(ResourceMap.GetEntries());
 
                     updateDisplay();
+                    await _parent.OnGenshinAssetMapLoaded(path, _firstAssetEntries);
                 }
                 catch (Exception ex)
                 {
                     Logger.Error($"Failed to load map : {ex.ToString()}");
                 }
+                finally { Enabled = true; }
             }
             loadAssetMap.Enabled = true;
         }
@@ -210,6 +213,8 @@ namespace AnimeStudio.GUI
                 _parent.Invoke(() => _parent.LoadPaths(files, filePaths.ToArray()));
             }
         }
+        internal AssetEntry[] GetSelectedMapEntries() => assetDataGridView.SelectedRows.Cast<DataGridViewRow>()
+            .Select(row => _assetEntries[row.Index]).ToArray();
         private async void exportSelected_Click(object sender, EventArgs e)
         {
             var saveFolderDialog = new OpenFolderDialog();
@@ -519,6 +524,7 @@ namespace AnimeStudio.GUI
         public void Clear()
         {
             ResourceMap.Clear();
+            _parent.ClearGenshinReferences();
             _assetEntries.Clear();
             assetDataGridView.Rows.Clear();
         }

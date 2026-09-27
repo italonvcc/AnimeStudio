@@ -60,7 +60,7 @@ namespace AnimeStudio
         }
 
         private static bool IsKnownEditor(string editor) =>
-            editor == "MoleMole.RevertableEditor" || editor == "MiHoYoASEMaterialInspector" || editor == "MoleMole.ASECharacterShaderEditorBase" ||
+            editor == "MoleMole.RevertableEditor" || editor == "MiHoYoASEMaterialInspector" || editor == "MoleMole.ASECharacterShaderEditorBase" || editor == "MiHoYoParticleCommonEditor" ||
             editor.StartsWith("MoleMole.", StringComparison.Ordinal) && editor.EndsWith("ShaderEditor", StringComparison.Ordinal);
 
         private static uint ReadUInt(byte[] data, int position) => BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(position, 4));

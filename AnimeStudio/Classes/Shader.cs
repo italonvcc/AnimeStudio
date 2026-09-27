@@ -1261,7 +1261,8 @@ namespace AnimeStudio
                     (reader.Game.Type.IsGI() && version[0] == 2017 && ex is (OverflowException or ArgumentOutOfRangeException or System.IO.InvalidDataException)))
                 {
                     Logger.Warning($"Shader program parsing failed ({ex.GetType().Name}) for {reader.assetsFile.fileName} at path {reader.m_PathID}; preserving identity and raw data.");
-                    if (reader.Game.Type.IsGI() && version[0] == 2017 && byteSize <= 64 * 1024 * 1024)
+                    // Some current-client particle shaders exceed 64 MiB.
+                    if (reader.Game.Type.IsGI() && version[0] == 2017 && byteSize <= 128 * 1024 * 1024)
                     {
                         recoveredName = GenshinShaderNameReader.TryRead(GetRawData());
                         if (recoveredName != null)

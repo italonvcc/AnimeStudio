@@ -13,7 +13,7 @@ namespace AnimeStudio
 {
     public static class GenshinVfxExporter
     {
-        public static string Export(AssetsManager manager, IEnumerable<AssetEntry> entries, string requestFile, string destination)
+        public static string Export(AssetsManager manager, IEnumerable<AssetEntry> entries, string requestFile, string destination, bool exportMaterials = true)
         {
             if (!manager.Game.Type.IsGI()) throw new ArgumentException("Select Genshin Impact.");
             if (Directory.Exists(destination) || File.Exists(destination)) throw new IOException("Choose a new output directory.");
@@ -30,7 +30,8 @@ namespace AnimeStudio
                 string name = (string)selector["name"];
                 ClassIDType type = selector["type"] == null ? ClassIDType.GameObject : Enum.Parse<ClassIDType>((string)selector["type"]);
                 long? id = selector["pathID"] == null ? null : long.Parse((string)selector["pathID"]);
-                var matches = map.Where(e => e.Name == name && e.Type == type && (id == null || e.PathID == id)).ToArray();
+                string source = (string)selector["source"];
+                var matches = map.Where(e => e.Name == name && e.Type == type && (id == null || e.PathID == id) && (source == null || string.Equals(source, e.Source, StringComparison.OrdinalIgnoreCase))).ToArray();
                 if (matches.Length != 1) { missingSelections.Add(new { selection = selector, count = matches.Length, reason = "Missing/ambiguous exact asset-map match" }); continue; }
                 if (matches[0].Offset < 0) throw new InvalidDataException("Regenerate the map with bundle offsets.");
                 chosen.Add(selector, matches[0]);
@@ -50,6 +51,7 @@ namespace AnimeStudio
                 var outputs = new Dictionary<Object, string>(); var failures = new List<object>();
                 foreach (var obj in graph.Objects)
                 {
+                    if (obj is Material && !exportMaterials) continue;
                     string folder = Path.Combine(destination, obj.type.ToString()); Directory.CreateDirectory(folder);
                     string file = Path.Combine(folder, Safe(obj.assetsFile.fileName) + "_" + obj.m_PathID);
                     try

@@ -10,7 +10,7 @@ namespace AnimeStudio
     public static class GenshinModelExporter
     {
         public static string Export(AssetsManager manager, IEnumerable<AssetEntry> map, Object root,
-            string destination, AnimationClip[] clips = null, string unityEditor = null, IReadOnlyDictionary<long, long> animationLayers = null, IReadOnlyList<GenshinPartReplacement> replacements = null)
+            string destination, AnimationClip[] clips = null, IReadOnlyList<GenshinPartReplacement> replacements = null, bool exportMaterials = true)
         {
             if (!manager.Game.Type.IsGI()) throw new ArgumentException("Select Genshin Impact before exporting.");
             if (root is not (Animator or GameObject)) throw new ArgumentException("Select an Animator or GameObject root.");
@@ -26,35 +26,29 @@ namespace AnimeStudio
                 throw new InvalidOperationException($"Cannot export a complete model: {missingGeometry.Length} mesh, rig, material, or texture dependencies are unresolved. Resolve the source map/dependencies first.");
             var options = new ModelConverter.Options
             {
-                game = manager.Game, imageFormat = ImageFormat.Png, exportMaterials = true,
+                game = manager.Game, imageFormat = ImageFormat.Png, exportMaterials = exportMaterials,
                 collectAnimations = false, exportAnimatorRootOnly = true, materials = new HashSet<Material>(),
                 uvs = Enumerable.Range(0, 8).ToDictionary(i => $"UV{i}", _ => (true, 0)),
                 texs = new Dictionary<string, int>()
             };
-            var converted = animator != null ? new ModelConverter(animator, options, clips ?? Array.Empty<AnimationClip>())
-                : new ModelConverter((GameObject)root, options, clips ?? Array.Empty<AnimationClip>());
+            var converted = animator != null ? new ModelConverter(animator, options, Array.Empty<AnimationClip>())
+                : new ModelConverter((GameObject)root, options, Array.Empty<AnimationClip>());
             if (converted.MeshList.Count == 0) throw new InvalidOperationException("No meshes were converted.");
             var assembly = new List<object>();
             foreach (var replacement in replacements ?? Array.Empty<GenshinPartReplacement>())
                 assembly.Add(new { source = Identity(replacement.Root), result = GenshinPartAssembler.Replace(converted,
                     new ModelConverter(replacement.Root, options, Array.Empty<AnimationClip>()), replacement.Slot, replacement.RemoveMeshes) });
             Directory.CreateDirectory(destination);
-            object bake = null;
-            if (unityEditor != null)
-            {
-                if (animator == null || !animator.m_Avatar.TryGet(out var avatar)) throw new InvalidOperationException("Humanoid baking requires the selected Animator's Avatar.");
-                bake = UnityHumanoidBaker.Bake(avatar, clips ?? Array.Empty<AnimationClip>(), destination, unityEditor, converted, animationLayers);
-            }
             var name = SafeName(root.Name);
             var fbx = Path.Combine(destination, name + ".fbx");
             Fbx.Exporter.Export(fbx, converted, new Fbx.ExportOptions
             {
-                exportAllNodes = true, exportSkins = true, exportAnimations = true, exportBlendShape = true, continuousBoneHierarchy = true,
+                exportAllNodes = true, exportSkins = true, exportAnimations = false, exportBlendShape = true, continuousBoneHierarchy = true,
                 boneSize = 10, scaleFactor = 100, fbxVersion = 3, fbxFormat = 0, eulerFilter = true, filterPrecision = 0.25f
             });
             var settings = new JsonSerializerSettings { Converters = { new StringEnumConverter() } };
             var materials = Path.Combine(destination, "Materials");
-            Directory.CreateDirectory(materials);
+            if (exportMaterials) Directory.CreateDirectory(materials);
             foreach (var material in options.materials)
                 File.WriteAllText(Path.Combine(materials, SafeName(material.Name) + "_" + material.m_PathID + ".json"), MaterialJsonExporter.Serialize(material, settings));
             var sourceClips = new List<object>();
@@ -70,7 +64,7 @@ namespace AnimeStudio
                     sourceClips.Add(new { source = Identity(clip), file = "Animations/" + file, humanoidBindings = humanoid,
                         sampleRate = clip.m_SampleRate, startTime = clip.m_MuscleClip?.m_StartTime, stopTime = clip.m_MuscleClip?.m_StopTime,
                         loopTime = clip.m_MuscleClip?.m_LoopTime,
-                        fbxStatus = bake != null ? "See humanoidBake for per-clip bake coverage" : humanoid > 0 ? "Incomplete: humanoid muscle curves are preserved in .anim but not baked onto FBX bones" : "Transform tracks exported; playback requires validation" });
+                        fbxStatus = "Rig/model only. Animation is exported as native Unity .anim." });
                 }
             }
             var manifest = new
@@ -91,7 +85,7 @@ namespace AnimeStudio
                 }),
                 meshes = converted.MeshList.Select(m => new { m.Path, vertices = m.VertexList.Count, bones = m.BoneList?.Count }),
                 clips = converted.AnimationList.Select(a => new { a.Name, a.SampleRate, tracks = a.TrackList.Count }),
-                sourceClips, humanoidBake = bake, assembly,
+                sourceClips, assembly,
                 objects = dependencies.Objects.Select(Identity)
             };
             File.WriteAllText(Path.Combine(destination, "manifest.json"), JsonConvert.SerializeObject(manifest, Formatting.Indented, settings));
