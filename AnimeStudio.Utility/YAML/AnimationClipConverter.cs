@@ -18,6 +18,17 @@ namespace AnimeStudio
         private readonly Game game;
         private readonly AnimationClip animationClip;
         private readonly CustomCurveResolver m_customCurveResolver;
+        private readonly Dictionary<int, GenericBinding> bindingCache = new();
+        private readonly Dictionary<GenericBinding, FloatCurve> muscleCurves = new();
+        private readonly object sourceGate;
+        private readonly Dictionary<(BindingCustomType, uint, string), string> attributeCache = new();
+
+        private GenericBinding FindBinding(AnimationClipBindingConstant bindings, int index)
+        {
+            if (!bindingCache.TryGetValue(index, out var binding))
+                bindingCache[index] = binding = bindings.FindBinding(index);
+            return binding;
+        }
 
         private readonly Dictionary<Vector3Curve, List<Keyframe<Vector3>>> m_translations = new Dictionary<Vector3Curve, List<Keyframe<Vector3>>>();
         private readonly Dictionary<QuaternionCurve, List<Keyframe<Quaternion>>> m_rotations = new Dictionary<QuaternionCurve, List<Keyframe<Quaternion>>>();
@@ -33,16 +44,17 @@ namespace AnimeStudio
         public List<FloatCurve> Floats { get; private set; }
         public List<PPtrCurve> PPtrs { get; private set; }
 
-        public AnimationClipConverter(AnimationClip clip)
+        public AnimationClipConverter(AnimationClip clip, object sourceGate = null)
         {
+            this.sourceGate = sourceGate ?? new object();
             game = clip.assetsFile.game;
             animationClip = clip;
             m_customCurveResolver = new CustomCurveResolver(animationClip);
         }
 
-        public static AnimationClipConverter Process(AnimationClip clip)
+        public static AnimationClipConverter Process(AnimationClip clip, object sourceGate = null)
         {
-            var converter = new AnimationClipConverter(clip);
+            var converter = new AnimationClipConverter(clip, sourceGate);
             converter.ProcessInner();
             return converter;
         }
@@ -50,7 +62,8 @@ namespace AnimeStudio
         {
             var m_Clip = animationClip.m_MuscleClip.m_Clip;
             var bindings = animationClip.m_ClipBindingConstant;
-            var tos = animationClip.FindTOS();
+            Dictionary<uint, string> tos;
+            lock (sourceGate) tos = animationClip.FindTOS();
 
             var streamedFrames = m_Clip.m_StreamedClip.ReadData();
             var lastDenseFrame = m_Clip.m_DenseClip.m_FrameCount / m_Clip.m_DenseClip.m_SampleRate;
@@ -131,7 +144,7 @@ namespace AnimeStudio
                     var index = curve.index;
                     if (!game.Type.IsSRGroup())
                         index += (int)animationClip.m_MuscleClip.m_Clip.m_ACLClip.CurveCount;
-                    var binding = bindings.FindBinding(index);
+                    var binding = FindBinding(bindings, index);
 
                     var path = GetCurvePath(tos, binding.path);
                     if (binding.typeID == ClassIDType.Transform)
@@ -180,7 +193,7 @@ namespace AnimeStudio
                     var index = (int)streamCount + curveIndex;
                     if (!game.Type.IsSRGroup())
                         index += (int)clip.m_ACLClip.CurveCount;
-                    var binding = bindings.FindBinding(index);
+                    var binding = FindBinding(bindings, index);
                     var path = GetCurvePath(tos, binding.path);
                     var framePosition = frameOffset + curveIndex;
                     if (binding.typeID == ClassIDType.Transform)
@@ -204,7 +217,10 @@ namespace AnimeStudio
         private float ProcessACLClip(Clip clip, AnimationClipBindingConstant bindings, Dictionary<uint, string> tos)
         {
             var acl = clip.m_ACLClip;
-            acl.Process(game, out var values, out var times);
+            float[] values, times;
+            // Keep native decoder entry and graph resolution serialized. The
+            // per-clip managed curves below can be built independently.
+            lock (sourceGate) acl.Process(game, out values, out times);
             float[] slopeValues = new float[4]; // no slopes - 0 values
 
             int frameCount = times.Length;
@@ -217,7 +233,7 @@ namespace AnimeStudio
                     var index = curveIndex;
                     if (game.Type.IsSRGroup())
                         index += (int)(clip.m_DenseClip.m_CurveCount + clip.m_StreamedClip.curveCount);
-                    GenericBinding binding = bindings.FindBinding(index);
+                    GenericBinding binding = FindBinding(bindings, index);
                     string path = GetCurvePath(tos, binding.path);
                     int framePosition = frameOffset + curveIndex;
                     if (binding.typeID == ClassIDType.Transform)
@@ -256,7 +272,7 @@ namespace AnimeStudio
                     var index = (int)(streamCount + denseCount + curveIndex);
                     if (clip.m_ACLClip.IsSet)
                         index += (int)clip.m_ACLClip.CurveCount;
-                    GenericBinding binding = bindings.FindBinding(index);
+                    GenericBinding binding = FindBinding(bindings, index);
                     string path = GetCurvePath(tos, binding.path);
                     if (binding.typeID == ClassIDType.Transform)
                     {
@@ -285,7 +301,12 @@ namespace AnimeStudio
                     AddAnimatorMuscleCurve(binding, time, value);
                     break;
                 default:
-                    string attribute = m_customCurveResolver.ToAttributeName((BindingCustomType)binding.customType, binding.attribute, path);
+                    var attributeKey = ((BindingCustomType)binding.customType, binding.attribute, path);
+                    if (!attributeCache.TryGetValue(attributeKey, out string attribute))
+                    {
+                        lock (sourceGate) attribute = m_customCurveResolver.ToAttributeName(attributeKey.Item1, binding.attribute, path);
+                        attributeCache.Add(attributeKey, attribute);
+                    }
                     if (binding.isPPtrCurve == 0x01)
                     {
                         PPtrCurve curve = new PPtrCurve(path, attribute, binding.typeID, binding.script.Cast<MonoScript>());
@@ -479,7 +500,8 @@ namespace AnimeStudio
 
         private void AddAnimatorMuscleCurve(GenericBinding binding, float time, float value)
         {
-            FloatCurve curve = new FloatCurve(string.Empty, binding.GetHumanoidMuscle().ToAttributeString(), ClassIDType.Animator, new PPtr<MonoScript>(0, 0, null));
+            if (!muscleCurves.TryGetValue(binding, out var curve))
+                muscleCurves[binding] = curve = new FloatCurve(string.Empty, binding.GetHumanoidMuscle().ToAttributeString(), ClassIDType.Animator, new PPtr<MonoScript>(0, 0, null));
             AddFloatKeyframe(curve, time, value);
         }
 

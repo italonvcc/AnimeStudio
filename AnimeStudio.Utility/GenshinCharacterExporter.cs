@@ -40,7 +40,8 @@ namespace AnimeStudio
                 if (references.AudioDirectory == null) throw new DirectoryNotFoundException("Could not locate AudioAssets beside the selected client's AssetBundles.");
                 voiceRequest = GenshinVoiceReferences.Prepare(references.CacheDirectory, token, progress, out decoder);
             }
-            var manager = new AssetsManager { Game = GameManager.GetGameByType(GameType.GI), ResolveDependencies = false };
+            var manager = new AssetsManager { Game = GameManager.GetGameByType(GameType.GI), ResolveDependencies = false,
+                ObjectReadWorkers = GenshinExportWorkers.Count };
             try
             {
                 progress?.Invoke("Loading selected character and Unity animations");

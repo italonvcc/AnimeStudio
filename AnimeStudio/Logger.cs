@@ -43,14 +43,26 @@ namespace AnimeStudio
             }
         }
 
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
         public static void Verbose(string message)
         {
             if (!Flags.HasFlag(LoggerEvent.Verbose) || Silent)
                 return;
+            WriteVerbose(message);
+        }
 
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        public static void Verbose(ref VerboseLogInterpolatedStringHandler message)
+        {
+            if (message.Enabled) WriteVerbose(message.GetFormattedText());
+        }
+
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private static void WriteVerbose(string message)
+        {
             try
             {
-                var callerMethod = new StackTrace().GetFrame(1).GetMethod();
+                var callerMethod = new StackTrace().GetFrame(2).GetMethod();
                 var callerMethodClass = callerMethod.ReflectedType.Name;
                 if (!string.IsNullOrEmpty(callerMethodClass))
                 {

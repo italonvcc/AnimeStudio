@@ -4,6 +4,9 @@ using System.IO;
 using System.Linq;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Diagnostics;
 
 namespace AnimeStudio
 {
@@ -56,20 +59,40 @@ namespace AnimeStudio
             var sourceClips = new List<object>();
             if (clips?.Length > 0)
             {
+                clips = clips.Distinct().ToArray();
+                if (clips.GroupBy(c => SafeName(c.Name) + "_" + c.m_PathID + ".anim", StringComparer.OrdinalIgnoreCase).Any(g => g.Count() > 1))
+                    throw new InvalidDataException("Selected animation sources would overwrite the same output filename.");
                 var animationDirectory = Path.Combine(destination, "Animations");
                 Directory.CreateDirectory(animationDirectory);
-                foreach (var clip in clips)
+                var records = new object[clips.Length];
+                var prepareLock = new object();
+                int completed = 0, workers = Math.Min(clips.Length, GenshinExportWorkers.Count);
+                long prepareTicks = 0, writeTicks = 0;
+                var elapsed = Stopwatch.StartNew();
+                Logger.Info($"Exporting animations with {workers} workers; shared readers and native decoding remain serialized");
+                Parallel.For(0, clips.Length, new ParallelOptions { MaxDegreeOfParallelism = workers }, index =>
                 {
-                    Logger.Info($"Exporting animation {sourceClips.Count + 1}/{clips.Length}: {clip.Name}");
+                    var clip = clips[index];
                     var file = SafeName(clip.Name) + "_" + clip.m_PathID + ".anim";
-                    string yaml = clip.Convert(reduceConstantKeys: compactAnimations);
+                    long start = Stopwatch.GetTimestamp();
+                    clip.PrepareForExport(reduceConstantKeys: compactAnimations, sourceGate: prepareLock);
+                    Interlocked.Add(ref prepareTicks, Stopwatch.GetTimestamp() - start);
+                    long writeStart = Stopwatch.GetTimestamp();
+                    string yaml = AnimationClipExtensions.ConvertSerializedAnimationClip(clip);
                     File.WriteAllText(Path.Combine(animationDirectory, file), compactAnimations ? GenshinAnimationText.Compact(yaml) : yaml);
+                    Interlocked.Add(ref writeTicks, Stopwatch.GetTimestamp() - writeStart);
                     var humanoid = clip.m_ClipBindingConstant?.genericBindings.Count(b => b.typeID == ClassIDType.Animator && b.customType == 8) ?? 0;
-                    sourceClips.Add(new { source = Identity(clip), file = "Animations/" + file, humanoidBindings = humanoid,
+                    records[index] = new { source = Identity(clip), file = "Animations/" + file, humanoidBindings = humanoid,
                         sampleRate = clip.m_SampleRate, startTime = clip.m_MuscleClip?.m_StartTime, stopTime = clip.m_MuscleClip?.m_StopTime,
                         loopTime = clip.m_MuscleClip?.m_LoopTime,
-                        fbxStatus = "Rig/model only. Animation is exported as native Unity .anim." });
-                }
+                        fbxStatus = "Rig/model only. Animation is exported as native Unity .anim." };
+                    Logger.Info($"Exporting animation {Interlocked.Increment(ref completed)}/{clips.Length}: {clip.Name}");
+                });
+                sourceClips.AddRange(records);
+                File.WriteAllText(Path.Combine(destination, "animation-export-performance.json"), JsonConvert.SerializeObject(new {
+                    workers, clips = clips.Length, seconds = elapsed.Elapsed.TotalSeconds,
+                    prepareWorkerSeconds = prepareTicks / (double)Stopwatch.Frequency,
+                    writeWorkerSeconds = writeTicks / (double)Stopwatch.Frequency }, Formatting.Indented));
             }
             var manifest = new
             {

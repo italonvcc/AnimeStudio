@@ -6,6 +6,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using static AnimeStudio.ImportHelper;
 
 namespace AnimeStudio
@@ -16,6 +17,9 @@ namespace AnimeStudio
         public bool Silent = false;
         public bool SkipProcess = false;
         public bool ResolveDependencies = false;
+        // Opt-in for GI exports. Each worker owns a different serialized-file
+        // cursor; graph linking still runs after all parsing has completed.
+        public int ObjectReadWorkers { get; set; } = 1;
         public string SpecifyUnityVersion;
         /// <summary>
         /// Invoked after each bundle/CAB group is loaded from a multi-bundle block.
@@ -706,7 +710,7 @@ namespace AnimeStudio
                 if (file == null)
                     throw new Exception("Unsupported game block file type");
 
-                Logger.Verbose($"file total size: {file.m_Header.size:X8}");
+                Logger.Verbose($"file total size: {(object)file.m_Header.size:X8}");
                 foreach (var innerFile in file.fileList)
                 {
                     var dummyPath = Path.Combine(Path.GetDirectoryName(reader.FullPath), innerFile.fileName);
@@ -834,8 +838,10 @@ namespace AnimeStudio
 
             var progressCount = assetsFileList.Sum(x => x.m_Objects.Count);
             int i = 0;
+            var progressGate = new object();
+            void ReportRead() { lock (progressGate) Progress.Report(++i, progressCount); }
             Progress.Reset();
-            foreach (var assetsFile in assetsFileList)
+            void ReadFileObjects(SerializedFile assetsFile)
             {
                 foreach (var objectInfo in assetsFile.m_Objects)
                 {
@@ -846,7 +852,7 @@ namespace AnimeStudio
                     }
                     if (assetsFile.ObjectsDic.ContainsKey(objectInfo.m_PathID))
                     {
-                        Progress.Report(++i, progressCount);
+                        ReportRead();
                         continue;
                     }
                     var objectReader = new ObjectReader(assetsFile.reader, assetsFile, objectInfo, Game);
@@ -906,9 +912,13 @@ namespace AnimeStudio
                         Logger.Error(sb.ToString());
                     }
 
-                    Progress.Report(++i, progressCount);
+                    ReportRead();
                 }
             }
+            if (Game.Type.IsGI() && ObjectReadWorkers > 1)
+                Parallel.ForEach(assetsFileList, new ParallelOptions { MaxDegreeOfParallelism = ObjectReadWorkers }, ReadFileObjects);
+            else
+                foreach (var file in assetsFileList) ReadFileObjects(file);
         }
 
         private void ProcessAssets()

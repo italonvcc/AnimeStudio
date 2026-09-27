@@ -35,9 +35,9 @@ namespace AnimeStudio
             return hashstring;
         }
 
-        public static SKBitmap ConvertToImage(this Texture2D m_Texture2D, bool flip)
+        public static SKBitmap ConvertToImage(this Texture2D m_Texture2D, bool flip, ResourceReader imageData = null)
         {
-            var converter = new Texture2DConverter(m_Texture2D);
+            var converter = new Texture2DConverter(m_Texture2D, imageData);
             byte[] buff = ArrayPool<byte>.Shared.Rent(m_Texture2D.m_Width * m_Texture2D.m_Height * 4);
             try
             {
@@ -60,9 +60,9 @@ namespace AnimeStudio
             }
         }
 
-        public static MemoryStream ConvertToStream(this Texture2D m_Texture2D, ImageFormat imageFormat, bool flip)
+        public static MemoryStream ConvertToStream(this Texture2D m_Texture2D, ImageFormat imageFormat, bool flip, ResourceReader imageData = null)
         {
-            var image = ConvertToImage(m_Texture2D, flip);
+            var image = ConvertToImage(m_Texture2D, flip, imageData);
             if (image != null)
             {
                 using (image)

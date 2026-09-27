@@ -8,6 +8,9 @@ using System.Text.RegularExpressions;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
 using Newtonsoft.Json.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Diagnostics;
 
 namespace AnimeStudio
 {
@@ -50,12 +53,22 @@ namespace AnimeStudio
                 var graph = resolver.Resolve(roots.Values);
                 Directory.CreateDirectory(destination);
                 var settings = new JsonSerializerSettings { Converters = { new StringEnumConverter() } };
-                var outputs = new Dictionary<Object, string>(); var failures = new List<object>();
-                int completed = 0;
-                foreach (var obj in graph.Objects)
+                var files = new string[graph.Objects.Count]; var errors = new object[graph.Objects.Count];
+                var sourceGate = new object();
+                int completed = 0, workers = GenshinExportWorkers.Count;
+                var elapsed = Stopwatch.StartNew();
+                void ReportCompleted()
                 {
-                    if (completed++ % 25 == 0) Logger.Info($"Exporting VFX objects {completed}/{graph.Objects.Count}: {obj.type} {obj.Name}");
-                    if (obj is Material && !exportMaterials) continue;
+                    int done = Interlocked.Increment(ref completed);
+                    if (done % 25 == 0 || done == graph.Objects.Count) Logger.Info($"Exporting VFX objects {done}/{graph.Objects.Count}");
+                }
+                Logger.Info($"Exporting VFX objects with {workers} workers");
+                Parallel.For(0, graph.Objects.Count, new ParallelOptions { MaxDegreeOfParallelism = workers }, index =>
+                {
+                    var obj = graph.Objects[index];
+                    if (obj is Material && !exportMaterials) { ReportCompleted(); return; }
+                    object identity;
+                    lock (sourceGate) identity = Identity(obj);
                     string folder = Path.Combine(destination, obj.type.ToString()); Directory.CreateDirectory(folder);
                     string file = Path.Combine(folder, Safe(obj.assetsFile.fileName) + "_" + obj.m_PathID);
                     try
@@ -64,10 +77,11 @@ namespace AnimeStudio
                         {
                             var layout = cube.ImageLayout;
                             var originalReader = layout.image_data;
-                            byte[] data = originalReader.GetData();
+                            byte[] data, raw;
+                            lock (sourceGate) { data = originalReader.GetData(); raw = cube.GetRawData(); }
                             if (data.Length != originalReader.Size) throw new InvalidDataException("Truncated cubemap resource data.");
                             File.WriteAllBytes(file + ".image-data.bin", data);
-                            File.WriteAllBytes(file + ".bin", cube.GetRawData());
+                            File.WriteAllBytes(file + ".bin", raw);
                             var faces = new List<string>();
                             using var dataReader = new BinaryReader(new MemoryStream(data, writable: false));
                             try
@@ -85,51 +99,70 @@ namespace AnimeStudio
                             }
                             finally { layout.image_data = originalReader; }
                             file += ".json";
-                            File.WriteAllText(file, JsonConvert.SerializeObject(new { identity = Identity(cube), layout.m_Width, layout.m_Height,
+                            File.WriteAllText(file, JsonConvert.SerializeObject(new { identity, layout.m_Width, layout.m_Height,
                                 layout.m_TextureFormat, layout.m_MipCount, layout.m_ImageCount, faces,
                                 imageData = Path.GetFileNameWithoutExtension(file) + ".image-data.bin", imageDataSha256 = Convert.ToHexString(SHA256.HashData(data)),
                                 interpretation = "Six serialized face indices, each with its source mip chain; PNG top-mip previews use the Texture2D export flip. Original compressed/HDR data is retained without quantization." }, Formatting.Indented, settings));
                         }
                         else if (obj is Texture2D texture)
                         {
-                            using var data = texture.ConvertToStream(ImageFormat.Png, true) ?? throw new InvalidDataException("Texture decoder produced no image.");
+                            byte[] source;
+                            lock (sourceGate) source = texture.image_data.GetData();
+                            using var snapshot = new BinaryReader(new MemoryStream(source, writable: false));
+                            using var data = texture.ConvertToStream(ImageFormat.Png, true, new ResourceReader(snapshot, 0, source.Length)) ?? throw new InvalidDataException("Texture decoder produced no image.");
                             if (data.Length == 0) throw new InvalidDataException("Texture encoder returned an empty image.");
                             data.Position = 0;
                             using var output = new FileStream(file + ".png", FileMode.CreateNew); data.CopyTo(output); file += ".png";
                         }
                         else if (obj is Material material)
                         {
-                            file += ".json"; File.WriteAllText(file, MaterialJsonExporter.Serialize(material, settings));
+                            string json;
+                            lock (sourceGate) json = MaterialJsonExporter.Serialize(material, settings);
+                            file += ".json"; File.WriteAllText(file, json);
                         }
                         else if (obj is AnimationClip clip)
                         {
-                            file += ".anim"; File.WriteAllText(file, clip.Convert());
+                            clip.PrepareForExport(sourceGate: sourceGate);
+                            file += ".anim"; File.WriteAllText(file, AnimationClipExtensions.ConvertSerializedAnimationClip(clip));
                         }
                         else
                         {
-                            byte[] bytes = obj.GetRawData(); File.WriteAllBytes(file + ".bin", bytes);
-                            object parsed = obj.ToType();
-                            object details = obj switch
+                            byte[] bytes; object details, parsed = null;
+                            bool snapshotType;
+                            lock (sourceGate)
                             {
-                                Transform t => new { position = t.m_LocalPosition, rotation = t.m_LocalRotation, scale = t.m_LocalScale,
-                                    parent = Ref(t.m_Father), children = t.m_Children.Select(p => Ref(p)).ToArray() },
-                                GameObject go => new { components = go.m_Components.Select(p => Ref(p.Cast<Object>())).ToArray() },
-                                Renderer r => new { materials = r.m_Materials.Select(p => Ref(p)).ToArray(), particleSpecificFields = r is GenshinParticleSystemRenderer or GenshinTrailRenderer ? "Unsupported; raw bytes preserved" : null },
-                                Mesh m => new { coordinateSystem = "Source Unity local coordinates; index winding unchanged", vertices = m.m_Vertices, indices = m.m_Indices,
-                                    normals = m.m_Normals, uv0 = m.m_UV0, subMeshes = m.m_SubMeshes, bindPose = m.m_BindPose },
-                                MonoBehaviour mono => new { script = mono.m_Script.Name, strings = Regex.Matches(Encoding.ASCII.GetString(bytes), @"[\x20-\x7e]{6,}")
-                                    .Select(m => new { offset = m.Index, text = m.Value }).ToArray() },
-                                Cubemap unsupportedCube => new { unsupportedCube.LayoutError, note = "Raw header retained; face/resource decoding unsupported for this layout." },
-                                _ => null
-                            };
+                                bytes = obj.GetRawData();
+                                snapshotType = obj.reader.byteStart % 4 == 0;
+                                if (!snapshotType) parsed = obj.ToType();
+                                details = obj switch
+                                {
+                                    Transform t => new { position = t.m_LocalPosition, rotation = t.m_LocalRotation, scale = t.m_LocalScale,
+                                        parent = Ref(t.m_Father), children = t.m_Children.Select(p => Ref(p)).ToArray() },
+                                    GameObject go => new { components = go.m_Components.Select(p => Ref(p.Cast<Object>())).ToArray() },
+                                    Renderer r => new { materials = r.m_Materials.Select(p => Ref(p)).ToArray(), particleSpecificFields = r is GenshinParticleSystemRenderer or GenshinTrailRenderer ? "Unsupported; raw bytes preserved" : null },
+                                    Mesh m => new { coordinateSystem = "Source Unity local coordinates; index winding unchanged", vertices = m.m_Vertices, indices = m.m_Indices,
+                                        normals = m.m_Normals, uv0 = m.m_UV0, subMeshes = m.m_SubMeshes, bindPose = m.m_BindPose },
+                                    MonoBehaviour mono => new { script = mono.m_Script.Name, strings = Regex.Matches(Encoding.ASCII.GetString(bytes), @"[\x20-\x7e]{6,}")
+                                        .Select(m => new { offset = m.Index, text = m.Value }).ToArray() },
+                                    Cubemap unsupportedCube => new { unsupportedCube.LayoutError, note = "Raw header retained; face/resource decoding unsupported for this layout." },
+                                    _ => null
+                                };
+                            }
+                            File.WriteAllBytes(file + ".bin", bytes);
+                            if (snapshotType) parsed = ReadTypeSnapshot(obj, bytes);
                             file += ".json";
-                            File.WriteAllText(file, JsonConvert.SerializeObject(new { identity = Identity(obj), raw = Path.GetFileNameWithoutExtension(file) + ".bin",
+                            File.WriteAllText(file, JsonConvert.SerializeObject(new { identity, raw = Path.GetFileNameWithoutExtension(file) + ".bin",
                                 sha256 = Convert.ToHexString(SHA256.HashData(bytes)), parsed, details }, Formatting.Indented, settings));
                         }
-                        outputs.Add(obj, Path.GetRelativePath(destination, file));
+                        files[index] = Path.GetRelativePath(destination, file);
                     }
-                    catch (Exception ex) { failures.Add(new { identity = Identity(obj), error = ex.Message }); }
-                }
+                    catch (Exception ex) { errors[index] = new { identity, error = ex.Message }; }
+                    ReportCompleted();
+                });
+                var outputs = graph.Objects.Select((obj,index) => (obj,file: files[index])).Where(p => p.file != null).ToDictionary(p => p.obj,p => p.file);
+                var failures = errors.Where(e => e != null).ToArray();
+                File.WriteAllText(Path.Combine(destination, "export-performance.json"), JsonConvert.SerializeObject(new {
+                    workers, objects = graph.Objects.Count, seconds = elapsed.Elapsed.TotalSeconds }, Formatting.Indented));
                 var actionReports = new List<object>();
                 foreach (var action in actions)
                 {
@@ -154,6 +187,17 @@ namespace AnimeStudio
                 return manifest;
             }
             finally { manager.FilterData = oldFilter; }
+        }
+        private static object ReadTypeSnapshot(Object obj, byte[] bytes)
+        {
+            if (obj.serializedType?.m_Type == null) return null;
+            // Type trees only align to four-byte boundaries. Keep unusual source
+            // offsets on the serial reader path; aligned objects use private cursors.
+            using var source = new EndianBinaryReader(new MemoryStream(bytes, writable: false), obj.reader.Endian);
+            using var reader = new ObjectReader(source, obj.assetsFile, new ObjectInfo {
+                byteStart = 0, byteSize = obj.byteSize, m_PathID = obj.m_PathID,
+                classID = (int)obj.type, serializedType = obj.serializedType }, obj.reader.Game);
+            return TypeTreeHelper.ReadType(obj.serializedType.m_Type, reader);
         }
         private static bool Unsupported(Object o) => o is GenshinParticleSystem or GenshinParticleSystemRenderer or GenshinTrailRenderer or MonoBehaviour or Animator || o is Cubemap c && c.ImageLayout == null || o.GetType() == typeof(Object);
         private static object Identity(Object o) => new { o.Name, type = o.type.ToString(), file = o.assetsFile.fileName, pathID = o.m_PathID.ToString(), source = o.assetsFile.originalPath };
