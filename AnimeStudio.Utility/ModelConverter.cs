@@ -915,6 +915,7 @@ namespace AnimeStudio
                         for (int frameIndex = 0; frameIndex < times.Length; frameIndex++)
                         {
                             var time = times[frameIndex];
+                            if (options.game.Type.IsGI() && time > animationClip.m_MuscleClip.m_StopTime + 0.00001f) continue;
                             var frameOffset = frameIndex * m_ACLClip.CurveCount;
                             for (int curveIndex = 0; curveIndex < m_ACLClip.CurveCount;)
                             {
@@ -927,6 +928,7 @@ namespace AnimeStudio
                     for (int frameIndex = 1; frameIndex < streamedFrames.Count - 1; frameIndex++)
                     {
                         var frame = streamedFrames[frameIndex];
+                        if (options.game.Type.IsGI() && frame.time > animationClip.m_MuscleClip.m_StopTime + 0.00001f) continue;
                         var streamedValues = frame.keyList.Select(x => x.value).ToArray();
                         for (int curveIndex = 0; curveIndex < frame.keyList.Count;)
                         {
@@ -941,6 +943,7 @@ namespace AnimeStudio
                     for (int frameIndex = 0; frameIndex < m_DenseClip.m_FrameCount; frameIndex++)
                     {
                         var time = m_DenseClip.m_BeginTime + frameIndex / m_DenseClip.m_SampleRate;
+                        if (options.game.Type.IsGI() && time > animationClip.m_MuscleClip.m_StopTime + 0.00001f) continue;
                         var frameOffset = frameIndex * m_DenseClip.m_CurveCount;
                         for (int curveIndex = 0; curveIndex < m_DenseClip.m_CurveCount;)
                         {

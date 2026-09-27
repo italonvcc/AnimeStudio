@@ -10,7 +10,7 @@ namespace AnimeStudio
     public static class GenshinModelExporter
     {
         public static string Export(AssetsManager manager, IEnumerable<AssetEntry> map, Animator animator,
-            string destination, AnimationClip[] clips = null)
+            string destination, AnimationClip[] clips = null, string unityEditor = null, IReadOnlyDictionary<long, long> animationLayers = null)
         {
             if (!manager.Game.Type.IsGI()) throw new ArgumentException("Select Genshin Impact before exporting.");
             destination = Path.GetFullPath(destination);
@@ -31,12 +31,18 @@ namespace AnimeStudio
             var converted = new ModelConverter(animator, options, clips ?? Array.Empty<AnimationClip>());
             if (converted.MeshList.Count == 0) throw new InvalidOperationException("No meshes were converted.");
             Directory.CreateDirectory(destination);
+            object bake = null;
+            if (unityEditor != null)
+            {
+                if (!animator.m_Avatar.TryGet(out var avatar)) throw new InvalidOperationException("Humanoid baking requires the selected Animator's Avatar.");
+                bake = UnityHumanoidBaker.Bake(avatar, clips ?? Array.Empty<AnimationClip>(), destination, unityEditor, converted, animationLayers);
+            }
             var name = SafeName(animator.Name);
             var fbx = Path.Combine(destination, name + ".fbx");
             Fbx.Exporter.Export(fbx, converted, new Fbx.ExportOptions
             {
                 exportAllNodes = true, exportSkins = true, exportAnimations = true, exportBlendShape = true, continuousBoneHierarchy = true,
-                boneSize = 10, scaleFactor = 1, fbxVersion = 3, fbxFormat = 0, eulerFilter = true, filterPrecision = 0.25f
+                boneSize = 10, scaleFactor = 100, fbxVersion = 3, fbxFormat = 0, eulerFilter = true, filterPrecision = 0.25f
             });
             var settings = new JsonSerializerSettings { Converters = { new StringEnumConverter() } };
             var materials = Path.Combine(destination, "Materials");
@@ -54,7 +60,9 @@ namespace AnimeStudio
                     File.WriteAllText(Path.Combine(animationDirectory, file), clip.Convert());
                     var humanoid = clip.m_ClipBindingConstant?.genericBindings.Count(b => b.typeID == ClassIDType.Animator && b.customType == 8) ?? 0;
                     sourceClips.Add(new { source = Identity(clip), file = "Animations/" + file, humanoidBindings = humanoid,
-                        fbxStatus = humanoid > 0 ? "Incomplete: humanoid muscle curves are preserved in .anim but not baked onto FBX bones" : "Transform tracks exported; playback requires validation" });
+                        sampleRate = clip.m_SampleRate, startTime = clip.m_MuscleClip?.m_StartTime, stopTime = clip.m_MuscleClip?.m_StopTime,
+                        loopTime = clip.m_MuscleClip?.m_LoopTime,
+                        fbxStatus = bake != null ? "See humanoidBake for per-clip bake coverage" : humanoid > 0 ? "Incomplete: humanoid muscle curves are preserved in .anim but not baked onto FBX bones" : "Transform tracks exported; playback requires validation" });
                 }
             }
             var manifest = new
@@ -63,6 +71,7 @@ namespace AnimeStudio
                 toolVersion = typeof(GenshinModelExporter).Assembly.GetName().Version.ToString(),
                 toolRevision = System.Reflection.CustomAttributeExtensions.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>(typeof(GenshinModelExporter).Assembly)?.InformationalVersion,
                 root = Identity(animator), model = Path.GetFileName(fbx),
+                units = "meters (FBX system unit: 100 centimeters)",
                 scope = "Model hierarchy, skinning, materials, textures, and explicitly selected clips. Runtime scripts, controllers and effect simulation are not reconstructed.",
                 dependencies.LoadedBundles, unresolved = dependencies.Missing,
                 parts = dependencies.Objects.OfType<SkinnedMeshRenderer>().Select(skin => new
@@ -74,7 +83,7 @@ namespace AnimeStudio
                 }),
                 meshes = converted.MeshList.Select(m => new { m.Path, vertices = m.VertexList.Count, bones = m.BoneList?.Count }),
                 clips = converted.AnimationList.Select(a => new { a.Name, a.SampleRate, tracks = a.TrackList.Count }),
-                sourceClips,
+                sourceClips, humanoidBake = bake,
                 objects = dependencies.Objects.Select(Identity)
             };
             File.WriteAllText(Path.Combine(destination, "manifest.json"), JsonConvert.SerializeObject(manifest, Formatting.Indented, settings));

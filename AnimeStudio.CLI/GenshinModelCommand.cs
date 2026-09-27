@@ -9,9 +9,9 @@ namespace AnimeStudio.CLI
     {
         public static int Run(string[] args)
         {
-            if (args.Length is < 4 or > 5)
+            if (args.Length is < 4 or > 9 || (args.Length > 5 && (args.Length is not (7 or 9) || args[5] != "--unity-editor")) || (args.Length == 9 && args[7] != "--layers"))
             {
-                Console.Error.WriteLine("Usage: --genshin-model <map.map|json> <AnimatorName[@PathID]> <new-output-directory> [clip-name-regex]");
+                Console.Error.WriteLine("Usage: --genshin-model <map.map|json> <AnimatorName[@PathID]> <new-output-directory> [clip-name-regex [--unity-editor <Unity.exe> [--layers <bodyPathID:secondaryPathID,...>]]]");
                 return 2;
             }
             var manager = new AssetsManager { Game = GameManager.GetGameByType(GameType.GI) };
@@ -28,7 +28,7 @@ namespace AnimeStudio.CLI
                     (pathID == null || pathID == e.PathID)).DistinctBy(e => (e.Source, e.Offset, e.PathID)).ToArray();
                 if (roots.Length != 1) throw new ArgumentException($"Expected one Animator, found {roots.Length}. Use the exact name and @PathID to disambiguate.");
                 var selected = roots.ToList();
-                if (args.Length == 5)
+                if (args.Length >= 5)
                 {
                     var regex = new Regex(args[4], RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(2));
                     var clips = ResourceMap.GetEntries().Where(e => e.Type == ClassIDType.AnimationClip && regex.IsMatch(e.Name)).ToList();
@@ -44,7 +44,8 @@ namespace AnimeStudio.CLI
                 var animations = objects.OfType<AnimationClip>().Where(c => selected.Any(e => e.Type == ClassIDType.AnimationClip &&
                     e.PathID == c.m_PathID && string.Equals(e.Source, c.assetsFile.originalPath, StringComparison.OrdinalIgnoreCase))).ToArray();
                 if (animations.Length != selected.Count - 1) throw new InvalidDataException("Some selected clips did not load.");
-                var result = GenshinModelExporter.Export(manager, ResourceMap.GetEntries(), animator, args[3], animations);
+                var layers = args.Length == 9 ? args[8].Split(',').Select(p => p.Split(':')).ToDictionary(p => long.Parse(p[0]), p => long.Parse(p[1])) : null;
+                var result = GenshinModelExporter.Export(manager, ResourceMap.GetEntries(), animator, args[3], animations, args.Length >= 7 ? args[6] : null, layers);
                 Console.WriteLine(result);
                 return 0;
             }

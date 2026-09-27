@@ -73,9 +73,27 @@ namespace AnimeStudio
             }
             if (m_Clip.m_ConstantClip != null)
             {
+                if (game.Type.IsGI()) lastFrame = animationClip.m_MuscleClip.m_StopTime;
                 ProcessConstant(m_Clip, bindings, tos, lastFrame);
             }
             CreateCurves();
+            if (game.Type.IsGI())
+            {
+                // Genshin ACL/dense streams include endpoint padding beyond the authored
+                // interval. Do not let those samples lengthen the serialized .anim clip.
+                float stop = animationClip.m_MuscleClip.m_StopTime;
+                void Trim<T>(List<Keyframe<T>> keys) where T : IYAMLExportable
+                {
+                    keys.RemoveAll(k => k.time > stop + 0.00001f);
+                    foreach (var key in keys) if (key.time > stop) key.time = stop;
+                }
+                foreach (var c in Translations) Trim(c.curve.m_Curve);
+                foreach (var c in Rotations) Trim(c.curve.m_Curve);
+                foreach (var c in Scales) Trim(c.curve.m_Curve);
+                foreach (var c in Eulers) Trim(c.curve.m_Curve);
+                foreach (var c in Floats) Trim(c.curve.m_Curve);
+                foreach (var c in PPtrs) c.curve.RemoveAll(k => k.time > stop + 0.00001f);
+            }
         }
 
         private void CreateCurves()
