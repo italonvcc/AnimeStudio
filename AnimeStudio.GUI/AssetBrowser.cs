@@ -518,13 +518,14 @@ namespace AnimeStudio.GUI
         }
         private void AssetBrowser_FormClosing(object sender, FormClosingEventArgs e)
         {
-            Clear();
+            // The main view can still export its loaded Animator using its map snapshot.
+            Clear(clearCharacterReferences: false);
             base.OnClosing(e);
         }
-        public void Clear()
+        public void Clear(bool clearCharacterReferences = true)
         {
             ResourceMap.Clear();
-            _parent.ClearGenshinReferences();
+            if (clearCharacterReferences) _parent.ClearGenshinReferences();
             _assetEntries.Clear();
             assetDataGridView.Rows.Clear();
         }
