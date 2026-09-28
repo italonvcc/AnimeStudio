@@ -975,7 +975,8 @@ namespace AnimeStudio
         public byte[] m_ClipData;
         public byte[] m_DatabaseData;
 
-        public override bool IsSet => !m_ClipData.IsNullOrEmpty() && !m_DatabaseData.IsNullOrEmpty();
+        // Some clips keep all ACL samples in the tracks and have no database.
+        public override bool IsSet => !m_ClipData.IsNullOrEmpty();
         public override uint CurveCount => m_CurveCount;
 
         public GIACLClip()

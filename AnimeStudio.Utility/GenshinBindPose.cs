@@ -12,7 +12,7 @@ namespace AnimeStudio
     {
         // Work on converted data only. Source transforms, skin weights, inverse
         // binds and Avatar calibration metadata remain intact.
-        public static int Restore(IImported model)
+        public static int Restore(IImported model, Avatar avatar = null)
         {
             var frames = new List<ImportedFrame>();
             void Visit(ImportedFrame f) { frames.Add(f); for (int i = 0; i < f.Count; i++) Visit(f[i]); }
@@ -20,6 +20,24 @@ namespace AnimeStudio
             var byPath = frames.ToDictionary(f => f.Path, StringComparer.Ordinal);
             var worlds = new Dictionary<ImportedFrame, M>();
             foreach (var f in frames) worlds[f] = Local(f) * (f.Parent == null ? M.Identity : worlds[f.Parent]);
+            // Skin weights do not reference every armature/helper bone. Restore
+            // those from the source default pose (not humanoid calibration).
+            // Keep original renderer worlds above as the skin constraint basis.
+            if (avatar?.m_Avatar.m_DefaultPose is { } pose)
+            {
+                var skeleton = avatar.m_Avatar.m_AvatarSkeleton;
+                if (pose.m_X.Length != skeleton.m_ID.Length)
+                    throw new InvalidDataException("Avatar default pose does not match its skeleton.");
+                for (int i = 0; i < skeleton.m_ID.Length; i++)
+                {
+                    if (!avatar.m_TOS.TryGetValue(skeleton.m_ID[i], out var path) || path.Length == 0 ||
+                        !byPath.TryGetValue(model.RootFrame.Path + "/" + path, out var f)) continue;
+                    var p = pose.m_X[i]; var t = (Vector3)p.t; var q = p.q; var s = (Vector3)p.s;
+                    f.LocalPosition = new Vector3(-t.X, t.Y, t.Z);
+                    f.LocalRotation = new Quaternion(q.X, -q.Y, -q.Z, q.W);
+                    f.LocalScale = s;
+                }
+            }
             var desired = new Dictionary<ImportedFrame, M>();
             void Constrain(ImportedFrame frame, M world)
             {
@@ -27,8 +45,9 @@ namespace AnimeStudio
                     throw new InvalidDataException("Conflicting mesh bind poses: " + frame.Path);
                 desired[frame] = world;
             }
-            // Keep mesh frames in place even when they are below changed bones.
-            foreach (var mesh in model.MeshList)
+            // Skin matrices are relative to the skinned renderer's frame. Rigid
+            // attachments must instead follow their restored parent bones.
+            foreach (var mesh in model.MeshList.Where(m => m.BoneList?.Count > 0))
                 Constrain(byPath[mesh.Path], worlds[byPath[mesh.Path]]);
             var bones = new HashSet<ImportedFrame>();
             foreach (var mesh in model.MeshList)

@@ -20,7 +20,10 @@ public class AnimeStudioCharacterImport : AssetPostprocessor
     [Serializable] public class Recipe { public string character, model; public Node[] nodes; public Clip[] clips; public TextureFile[] textures; public PreviewMaterial[] previewMaterials; public float humanScale, armTwist, foreArmTwist, upperLegTwist, legTwist, armStretch, legStretch, feetSpacing; public bool hasTranslationDoF; }
     [Serializable] public class Report { public bool success; public string error, prefab; public float humanScale; public int clips, meshes, composedPairs, textureAssignments; public string[] missingCurvePaths; }
     static bool scheduled, running;
-    static AnimeStudioCharacterImport() { Schedule(); }
+    static AnimeStudioCharacterImport() {
+        EditorApplication.playModeStateChanged += state => { if (state == PlayModeStateChange.EnteredEditMode) Schedule(); };
+        Schedule();
+    }
     static void OnPostprocessAllAssets(string[] imported, string[] deleted, string[] moved, string[] old)
     {
         if (imported.Concat(deleted).Concat(moved).Any(p => p.EndsWith(".character.json") || p.EndsWith(".fbx") || p.EndsWith(".anim") || p.EndsWith(".png"))) Schedule();
@@ -30,6 +33,9 @@ public class AnimeStudioCharacterImport : AssetPostprocessor
     {
         scheduled = false;
         if (running) return;
+        // Domain reload also occurs when entering Play mode. Never rebuild
+        // controllers or prefab assets while their scene instances are playing.
+        if (EditorApplication.isPlayingOrWillChangePlaymode) return;
         if (EditorApplication.isCompiling || EditorApplication.isUpdating) { Schedule(); return; }
         running = true;
         try
@@ -119,6 +125,7 @@ public class AnimeStudioCharacterImport : AssetPostprocessor
             var animator = instance.GetComponent<Animator>();
             if (animator == null) animator = instance.AddComponent<Animator>();
             animator.avatar = savedAvatar; animator.applyRootMotion = false;
+            animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
             if (Mathf.Abs(animator.humanScale - recipe.humanScale) > .001f) throw new Exception("Imported humanoid scale differs from the source.");
             string controllerPath = rigFolder + "/Character.controller";
             var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(controllerPath);
@@ -146,7 +153,7 @@ public class AnimeStudioCharacterImport : AssetPostprocessor
                     if (bodies.Length == 1)
                     {
                         string composition = rigFolder + "/" + Path.GetFileNameWithoutExtension(info.file) + ".genshinclip";
-                        string json = JsonUtility.ToJson(new AnimeStudioClipCompositionImport.Recipe { name = info.name + "__WithBody",
+                        string json = JsonUtility.ToJson(new Composition { name = info.name + "__WithBody",
                             body = "../" + bodies[0].file, secondary = "../" + info.file }, true);
                         if (!File.Exists(composition) || File.ReadAllText(composition) != json) File.WriteAllText(composition,json);
                         AssetDatabase.ImportAsset(composition,ImportAssetOptions.ForceSynchronousImport);
@@ -177,6 +184,9 @@ public class AnimeStudioCharacterImport : AssetPostprocessor
         catch (Exception e) { File.WriteAllText(reportFile, JsonUtility.ToJson(new Report { success = false, error = e.ToString() }, true)); Debug.LogException(e); }
         finally { if (instance != null) UnityEngine.Object.DestroyImmediate(instance); }
     }
+    // Keep character scripts compilable while the sibling Generic folder is
+    // being copied. Unity resolves the .genshinclip importer after compilation.
+    [Serializable] public class Composition { public string name, body, secondary; }
     static int BindTextures(GameObject instance, Recipe recipe, string folder, string rigFolder)
     {
         var files = (recipe.textures ?? new TextureFile[0]).ToDictionary(t => t.name, t => t.file);

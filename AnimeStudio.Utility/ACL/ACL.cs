@@ -139,7 +139,9 @@ namespace ACLLibs
         public static void DecompressTracks(byte[] data, byte[] db, out float[] values, out float[] times, bool isZZZ = false, bool isGenshin = false)
         {
             var decompressedClip = new DecompressedClip();
-            var bulkOffset = isGenshin ? GenshinBulkOffset(db) : 0;
+            bool hasDatabase = db != null && db.Length > 0;
+            if (isGenshin && !hasDatabase) ValidateStandaloneGenshinTracks(data);
+            var bulkOffset = isGenshin && hasDatabase ? GenshinBulkOffset(db) : 0;
             var dataPtr = Marshal.AllocHGlobal(checked(data.Length + 15));
             var dbPtr = IntPtr.Zero;
             try
@@ -147,13 +149,17 @@ namespace ACLLibs
                 var dataAligned = new IntPtr(16 * (((long)dataPtr + 15) / 16));
                 Marshal.Copy(data, 0, dataAligned, data.Length);
 
-                dbPtr = Marshal.AllocHGlobal(checked(db.Length + 15));
-                var dbAligned = new IntPtr(16 * (((long)dbPtr + 15) / 16));
-                Marshal.Copy(db, 0, dbAligned, db.Length);
+                var dbAligned = IntPtr.Zero;
+                if (hasDatabase)
+                {
+                    dbPtr = Marshal.AllocHGlobal(checked(db.Length + 15));
+                    dbAligned = new IntPtr(16 * (((long)dbPtr + 15) / 16));
+                    Marshal.Copy(db, 0, dbAligned, db.Length);
+                }
 
                 // Genshin appends the external database tiers after the serialized database header.
                 // A null streamer leaves the MHY scalar context uninitialized and decodes garbage.
-                var streamer = isGenshin ? IntPtr.Add(dbAligned, bulkOffset) : IntPtr.Zero;
+                var streamer = isGenshin && hasDatabase ? IntPtr.Add(dbAligned, bulkOffset) : IntPtr.Zero;
                 if (isZZZ)
                 {
                     DecompressTracksZZZ(dataAligned, dbAligned, streamer, ref decompressedClip);
@@ -200,6 +206,25 @@ namespace ACLLibs
             if (size < 64 || total > database.Length)
                 throw new System.IO.InvalidDataException("Genshin ACL database bulk data is truncated.");
             return checked((int)offset);
+        }
+
+        internal static void ValidateStandaloneGenshinTracks(byte[] data)
+        {
+            // The vendored ACL DB decoder supports a null database only when
+            // neither the transform nor scalar tracks refer to one.
+            int offset = 0;
+            while (true)
+            {
+                if (data == null || data.Length - offset < 32 || BitConverter.ToUInt32(data, offset + 8) != 0xAC11AC11)
+                    throw new System.IO.InvalidDataException("Invalid standalone Genshin ACL tracks.");
+                uint size = BitConverter.ToUInt32(data, offset);
+                if (size < 32 || size > data.Length - offset)
+                    throw new System.IO.InvalidDataException("Truncated standalone Genshin ACL tracks.");
+                if ((BitConverter.ToUInt32(data, offset + 28) & (1 << 8)) != 0)
+                    throw new System.IO.InvalidDataException("Genshin ACL tracks require a missing database.");
+                if (data[offset + 15] != 12) break; // scalar block; qvvf is followed by scalar tracks
+                offset = checked((int)(((long)offset + size + 15) & ~15L));
+            }
         }
 
         #region importfunctions

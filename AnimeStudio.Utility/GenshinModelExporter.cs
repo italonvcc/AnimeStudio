@@ -42,7 +42,9 @@ namespace AnimeStudio
                 assembly.Add(new { source = Identity(replacement.Root), result = GenshinPartAssembler.Replace(converted,
                     new ModelConverter(replacement.Root, options, Array.Empty<AnimationClip>()), replacement.Slot, replacement.RemoveMeshes) });
             Logger.Info("Restoring model bind pose from mesh skin matrices");
-            int bindPoseBones = GenshinBindPose.Restore(converted);
+            Avatar sourceAvatar = null;
+            animator?.m_Avatar.TryGet(out sourceAvatar);
+            int bindPoseBones = GenshinBindPose.Restore(converted, sourceAvatar);
             Directory.CreateDirectory(destination);
             var name = SafeName(root.Name);
             var fbx = Path.Combine(destination, name + ".fbx");
