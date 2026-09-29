@@ -174,11 +174,11 @@ namespace AnimeStudio
         /// loaded. For multi-bundle blocks (HSR ENCR .block) this fires once per inner bundle
         /// so callers can flush map entries and release streams before the next bundle loads.
         /// </summary>
-        private static void ForEachLoadedBundle(string[] files, Action<string> process)
+        private static void ForEachLoadedBundle(string[] files, Action<string> process, bool mergeSplitAssets = true)
         {
             var path = Path.GetDirectoryName(Path.GetFullPath(files[0]));
             // Merge splits once for the whole batch — not once per file inside AssetsManager.LoadFiles.
-            ImportHelper.MergeSplitAssets(path);
+            if (mergeSplitAssets) ImportHelper.MergeSplitAssets(path);
             var toReadFile = ImportHelper.ProcessingSplitFiles(files.ToList());
 
             var filesList = new List<string>(toReadFile);
@@ -373,7 +373,66 @@ namespace AnimeStudio
             }
         } 
 
-        public static async Task BuildAssetMap(string[] files, string mapName, Game game, string savePath, ExportListType exportListType, ClassIDType[] typeFilters = null, Regex[] nameFilters = null, Regex[] containerFilters = null)
+        public static List<(AssetEntry Entry, string SerializedFile)> FindQualifiedReferences(string[] files, Game game, IEnumerable<(string File, long PathID)> references)
+        {
+            if (files.Length is < 1 or > 64) throw new ArgumentException("Search 1–64 source files at a time.");
+            var wanted = references.Select(p => (p.File.ToUpperInvariant(), p.PathID)).ToHashSet();
+            if (wanted.Count is < 1 or > 4096) throw new ArgumentException("Supply 1–4096 qualified references.");
+            var results = new List<(AssetEntry Entry, string SerializedFile)>();
+            assetsManager.Game = game;
+            try
+            {
+                ForEachLoadedBundle(files, file =>
+                {
+                    foreach (var serialized in assetsManager.assetsFileList)
+                    foreach (var obj in serialized.m_Objects.Where(o => wanted.Contains((serialized.fileName.ToUpperInvariant(), o.m_PathID))))
+                    {
+                        var reader = new ObjectReader(serialized.reader, serialized, obj, game);
+                        results.Add((new AssetEntry { Source = Path.GetFullPath(file), Offset = serialized.offset, PathID = reader.m_PathID,
+                            Type = reader.type, Name = reader.type + " #" + reader.m_PathID, Container = "", Hash = "" }, serialized.fileName));
+                    }
+                }, mergeSplitAssets: false);
+                return results;
+            }
+            finally { assetsManager.Clear(); }
+        }
+
+        // Supplemental discovery ignores display/export flags: a hidden prefab is still a dependency.
+        public static List<AssetEntry> IndexGenshinReferences(string[] files)
+        {
+            if (files.Length is < 1 or > 64) throw new ArgumentException("Index 1–64 source files at a time.");
+            var result = new List<AssetEntry>();
+            var game = GameManager.GetGameByType(GameType.GI);
+            assetsManager.Game = game;
+            try
+            {
+                ForEachLoadedBundle(files, file =>
+                {
+                    foreach (var serialized in assetsManager.assetsFileList)
+                    foreach (var info in serialized.m_Objects)
+                    {
+                        var reader = new ObjectReader(serialized.reader, serialized, info, game);
+                        if (reader.type is not (ClassIDType.GameObject or ClassIDType.MonoBehaviour or ClassIDType.Mesh or ClassIDType.Shader or ClassIDType.Cubemap)) continue;
+                        string name = reader.type switch
+                        {
+                            ClassIDType.GameObject => new GameObject(reader).Name,
+                            ClassIDType.MonoBehaviour => new MonoBehaviour(reader).Name,
+                            _ => new ReferenceName(reader).Name
+                        };
+                        if (reader.type == ClassIDType.GameObject && !name.StartsWith("Eff_", StringComparison.Ordinal) && !name.StartsWith("SkillObj_", StringComparison.Ordinal)) continue;
+                        if (reader.type == ClassIDType.MonoBehaviour && !name.StartsWith("EventPattern_", StringComparison.Ordinal)) continue;
+                        result.Add(new AssetEntry { Source = Path.GetFullPath(file), Offset = serialized.offset, Type = reader.type,
+                            PathID = reader.m_PathID, Name = name, Container = "", Hash = "" });
+                    }
+                }, mergeSplitAssets: false);
+                return result;
+            }
+            finally { assetsManager.Clear(); }
+        }
+
+        private sealed class ReferenceName : NamedObject { public ReferenceName(ObjectReader reader) : base(reader) { } }
+
+        public static async Task BuildAssetMap(string[] files, string mapName, Game game, string savePath, ExportListType exportListType, ClassIDType[] typeFilters = null, Regex[] nameFilters = null, Regex[] containerFilters = null, bool mergeSplitAssets = true)
         {
             Logger.Info("Building AssetMap...");
             try
@@ -386,13 +445,13 @@ namespace AnimeStudio
                 if (game.Type.IsGISubGroup() || exportListType.HasFlag(ExportListType.JSON))
                 {
                     var assets = new List<AssetEntry>();
-                    ForEachLoadedBundle(files, file => BuildAssetMap(file, assets, typeFilters, nameFilters, containerFilters));
+                    ForEachLoadedBundle(files, file => BuildAssetMap(file, assets, typeFilters, nameFilters, containerFilters), mergeSplitAssets);
                     UpdateContainers(assets, game);
                     await ExportAssetsMap(assets, game, mapName, savePath, exportListType);
                 }
                 else
                 {
-                    await Task.Run(() => BuildAssetMapStreaming(files, mapName, game, savePath, exportListType, typeFilters, nameFilters, containerFilters));
+                    await Task.Run(() => BuildAssetMapStreaming(files, mapName, game, savePath, exportListType, typeFilters, nameFilters, containerFilters, mergeSplitAssets));
                 }
             }
             catch(Exception e)
@@ -406,7 +465,7 @@ namespace AnimeStudio
         /// Stream asset-map entries to disk while scanning so we never hold tens of millions of
         /// AssetEntry objects in RAM (the HSR OOM root cause for full-directory map builds).
         /// </summary>
-        private static void BuildAssetMapStreaming(string[] files, string mapName, Game game, string savePath, ExportListType exportListType, ClassIDType[] typeFilters, Regex[] nameFilters, Regex[] containerFilters)
+        private static void BuildAssetMapStreaming(string[] files, string mapName, Game game, string savePath, ExportListType exportListType, ClassIDType[] typeFilters, Regex[] nameFilters, Regex[] containerFilters, bool mergeSplitAssets)
         {
             Thread.CurrentThread.CurrentCulture = new CultureInfo("en-US");
             Directory.CreateDirectory(savePath);
@@ -467,7 +526,7 @@ namespace AnimeStudio
                             xmlWriter.WriteEndElement();
                         }
                     }
-                });
+                }, mergeSplitAssets);
 
                 if (xmlWriter != null)
                 {

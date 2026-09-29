@@ -124,7 +124,7 @@ namespace AnimeStudio
             {
                 var frameList = new List<ImportedFrame>();
                 var tempTransform = m_Transform;
-                while (tempTransform.m_Father.TryGet(out var m_Father))
+                while (!options.exportAnimatorRootOnly && tempTransform.m_Father.TryGet(out var m_Father))
                 {
                     frameList.Add(ConvertTransform(m_Father));
                     tempTransform = m_Father;
@@ -397,7 +397,9 @@ namespace AnimeStudio
                 //Tangent
                 if (iMesh.hasTangent)
                 {
-                    iVertex.Tangent = new Vector4(-mesh.m_Tangents[j * 4], mesh.m_Tangents[j * 4 + 1], mesh.m_Tangents[j * 4 + 2], mesh.m_Tangents[j * 4 + 3]);
+                    // Reflecting X changes the basis handedness as well as tangent X.
+                    // This preserves cross(normal, tangent) * w through the FBX round trip.
+                    iVertex.Tangent = new Vector4(-mesh.m_Tangents[j * 4], mesh.m_Tangents[j * 4 + 1], mesh.m_Tangents[j * 4 + 2], -mesh.m_Tangents[j * 4 + 3]);
                 }
                 //Colors
                 if (iMesh.hasColor)
@@ -790,6 +792,11 @@ namespace AnimeStudio
         {
             foreach (var animationClip in animationClipHashSet)
             {
+                if (!animationClip.m_Legacy && animationClip.m_ClipBindingConstant?.genericBindings
+                    ?.Any(binding => binding.typeID == ClassIDType.Animator && binding.customType == 8) == true)
+                {
+                    Logger.Warning($"{animationClip.m_Name}: humanoid Animator curves are not baked by FBX export. Body/finger animation may be missing; export the AnimationClip as .anim to preserve muscle curves.");
+                }
                 var iAnim = new ImportedKeyframedAnimation();
                 var name = animationClip.m_Name;
                 if (AnimationList.Exists(x => x.Name == name))
@@ -910,6 +917,7 @@ namespace AnimeStudio
                         for (int frameIndex = 0; frameIndex < times.Length; frameIndex++)
                         {
                             var time = times[frameIndex];
+                            if (options.game.Type.IsGI() && time > animationClip.m_MuscleClip.m_StopTime + 0.00001f) continue;
                             var frameOffset = frameIndex * m_ACLClip.CurveCount;
                             for (int curveIndex = 0; curveIndex < m_ACLClip.CurveCount;)
                             {
@@ -922,6 +930,7 @@ namespace AnimeStudio
                     for (int frameIndex = 1; frameIndex < streamedFrames.Count - 1; frameIndex++)
                     {
                         var frame = streamedFrames[frameIndex];
+                        if (options.game.Type.IsGI() && frame.time > animationClip.m_MuscleClip.m_StopTime + 0.00001f) continue;
                         var streamedValues = frame.keyList.Select(x => x.value).ToArray();
                         for (int curveIndex = 0; curveIndex < frame.keyList.Count;)
                         {
@@ -936,6 +945,7 @@ namespace AnimeStudio
                     for (int frameIndex = 0; frameIndex < m_DenseClip.m_FrameCount; frameIndex++)
                     {
                         var time = m_DenseClip.m_BeginTime + frameIndex / m_DenseClip.m_SampleRate;
+                        if (options.game.Type.IsGI() && time > animationClip.m_MuscleClip.m_StopTime + 0.00001f) continue;
                         var frameOffset = frameIndex * m_DenseClip.m_CurveCount;
                         for (int curveIndex = 0; curveIndex < m_DenseClip.m_CurveCount;)
                         {
@@ -1175,6 +1185,7 @@ namespace AnimeStudio
             public Game game;
             public bool collectAnimations;
             public bool exportMaterials;
+            public bool exportAnimatorRootOnly;
             public HashSet<Material> materials;
             public Dictionary<string, (bool, int)> uvs;
             public Dictionary<string, int> texs; 

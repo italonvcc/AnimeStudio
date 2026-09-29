@@ -49,7 +49,8 @@ namespace AnimeStudio
         public static Dictionary<uint, string> FindTOS(this AnimationClip clip)
         {
             var tos = new Dictionary<uint, string>() { { 0, string.Empty } };
-            foreach (var asset in clip.assetsFile.assetsManager.assetsFileList.SelectMany(x => x.Objects).OrderBy(x => x.type).ToArray())
+            foreach (var asset in clip.assetsFile.assetsManager.assetsFileList.SelectMany(x => x.Objects)
+                .Where(x => x.type is ClassIDType.Avatar or ClassIDType.Animator or ClassIDType.Animation).OrderBy(x => x.type))
             {
                 switch (asset.type)
                 {
@@ -142,11 +143,19 @@ namespace AnimeStudio
                 return false;
             }
         }
-        public static string Convert(this AnimationClip clip)
+        public static string Convert(this AnimationClip clip, bool reduceConstantKeys = false)
+        {
+            clip.PrepareForExport(reduceConstantKeys);
+            return ConvertSerializedAnimationClip(clip);
+        }
+
+        // A shared gate protects graph traversal and native decoding when callers
+        // prepare different clips concurrently. Each clip must have one owner.
+        public static void PrepareForExport(this AnimationClip clip, bool reduceConstantKeys = false, object sourceGate = null)
         {
             if (!clip.m_Legacy || clip.m_MuscleClip != null)
             {
-                var converter = AnimationClipConverter.Process(clip);
+                var converter = AnimationClipConverter.Process(clip, sourceGate);
                 clip.m_RotationCurves = converter.Rotations.Union(clip.m_RotationCurves).ToList();
                 clip.m_EulerCurves = converter.Eulers.Union(clip.m_EulerCurves).ToList();
                 clip.m_PositionCurves = converter.Translations.Union(clip.m_PositionCurves).ToList();
@@ -154,7 +163,7 @@ namespace AnimeStudio
                 clip.m_FloatCurves = converter.Floats.Union(clip.m_FloatCurves).ToList();
                 clip.m_PPtrCurves = converter.PPtrs.Union(clip.m_PPtrCurves).ToList();
             }
-            return ConvertSerializedAnimationClip(clip);
+            if (reduceConstantKeys) GenshinConstantCurveReduction.Apply(clip);
         }
         public static string ConvertSerializedAnimationClip(AnimationClip animationClip)
         {

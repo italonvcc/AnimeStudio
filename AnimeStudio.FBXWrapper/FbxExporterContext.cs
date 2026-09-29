@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -143,6 +143,14 @@ namespace AnimeStudio.FbxInterop
 
         internal void SetJointsNode(ImportedFrame rootFrame, HashSet<string> bonePaths, bool castToBone)
         {
+            var connectedBones = new HashSet<ImportedFrame>();
+            // Unweighted intermediary transforms must remain bones too. Otherwise importers
+            // can split one skin into nested armatures. Keep the selected model root as a container.
+            if (_exportOptions.continuousBoneHierarchy && bonePaths != null)
+                foreach (var candidate in _frameToNode.Keys)
+                    if (bonePaths.Contains(candidate.Path))
+                        for (var ancestor = candidate; ancestor != null && ancestor != rootFrame; ancestor = ancestor.Parent)
+                            connectedBones.Add(ancestor);
             var frameStack = new Stack<ImportedFrame>();
 
             frameStack.Push(rootFrame);
@@ -155,7 +163,14 @@ namespace AnimeStudio.FbxInterop
                 {
                     Debug.Assert(node != IntPtr.Zero);
 
-                    if (castToBone)
+                    if (_exportOptions.continuousBoneHierarchy && !castToBone)
+                    {
+                        if (connectedBones.Contains(frame))
+                            AsFbxSetJointsNode_CastToBone(_pContext, node, _exportOptions.boneSize);
+                        else
+                            AsFbxSetJointsNode_Generic(_pContext, node);
+                    }
+                    else if (castToBone)
                     {
                         AsFbxSetJointsNode_CastToBone(_pContext, node, _exportOptions.boneSize);
                     }
@@ -267,17 +282,13 @@ namespace AnimeStudio.FbxInterop
 
                 AsFbxMeshInitControlPoints(mesh, importedMesh.VertexList.Count);
 
+                // The polygon API writes material indices to layer zero. Create
+                // that layer before extra UV sets allocate additional layers.
+                AsFbxMeshCreateElementMaterial(mesh);
+
                 if (importedMesh.hasNormal)
                 {
                     AsFbxMeshCreateElementNormal(mesh);
-                }
-
-                for (int i = 0; i < importedMesh.hasUV.Length; i++)
-                {
-                    if (!importedMesh.hasUV[i]) { continue; }
-
-                    var type = importedMesh.uvType[i];
-                    AsFbxMeshCreateUV(mesh, i, type);
                 }
 
                 if (importedMesh.hasTangent)
@@ -290,7 +301,20 @@ namespace AnimeStudio.FbxInterop
                     AsFbxMeshCreateElementVertexColor(mesh);
                 }
 
-                AsFbxMeshCreateElementMaterial(mesh);
+                // Create single authored channels before adding UV layers.
+                // The SDK's CreateElement helpers otherwise attach extra layer
+                // references for tangents/binormals/colors. Unity can select an
+                // empty secondary element even though the FBX contains the data.
+                // All vertex writes below target element zero; keep its binding
+                // on the base layer, just like normals and polygon materials.
+                for (int i = 0; i < importedMesh.hasUV.Length; i++)
+                {
+                    if (!importedMesh.hasUV[i]) { continue; }
+
+                    var type = importedMesh.uvType[i];
+                    AsFbxMeshCreateUV(mesh, i, type);
+                }
+
 
                 foreach (var meshObj in importedMesh.SubmeshList)
                 {

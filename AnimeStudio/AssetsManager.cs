@@ -6,6 +6,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using static AnimeStudio.ImportHelper;
 
 namespace AnimeStudio
@@ -16,6 +17,13 @@ namespace AnimeStudio
         public bool Silent = false;
         public bool SkipProcess = false;
         public bool ResolveDependencies = false;
+        // Opt-in for GI exports. Each worker owns a different serialized-file
+        // cursor; graph linking still runs after all parsing has completed.
+        public int ObjectReadWorkers { get; set; } = 1;
+        // Map-browser model loads can seek directly to selected GI bundles.
+        // Keep legacy export discovery unchanged: it can rely on other objects
+        // from the same block for animation path/source-version selection.
+        public bool UseSelectedGenshinOffsets { get; set; }
         public string SpecifyUnityVersion;
         /// <summary>
         /// Invoked after each bundle/CAB group is loaded from a multi-bundle block.
@@ -36,6 +44,18 @@ namespace AnimeStudio
         internal HashSet<string> importFilesHash = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         internal HashSet<string> noexistFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         internal HashSet<string> assetsFileListHash = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<(string, long), HashSet<string>> bundleFiles = new();
+
+        // A CAB can occur in both installed and patched blocks. Preserve the
+        // observed source/offset -> CAB identity even when its stream is reused.
+        public Object FindAsset(AssetEntry entry)
+        {
+            string source = Path.GetFullPath(entry.Source).ToUpperInvariant();
+            bundleFiles.TryGetValue((source, entry.Offset), out var names);
+            var files = assetsFileList.Where(f => names?.Contains(f.fileName) == true ||
+                (f.originalPath != null && Path.GetFullPath(f.originalPath).ToUpperInvariant() == source && f.offset == entry.Offset));
+            return files.Select(f => f.ObjectsDic.GetValueOrDefault(entry.PathID)).Where(o => o != null && o.type == entry.Type).SingleOrDefault();
+        }
 
         public class AssetFilterDataItem
         {
@@ -165,7 +185,6 @@ namespace AnimeStudio
             importFiles.Clear();
             importFilesHash.Clear();
             noexistFiles.Clear();
-            assetsFileListHash.Clear();
             AssetsHelper.ClearOffsets();
 
             if (!SkipProcess)
@@ -317,7 +336,7 @@ namespace AnimeStudio
                     var assetsFile = new SerializedFile(reader, this);
                     CheckStrippedVersion(assetsFile);
                     assetsFileList.Add(assetsFile);
-                    assetsFileIndexCache.Add(assetsFile.fileName, assetsFileList.Count - 1);
+                    assetsFileIndexCache[assetsFile.fileName] = assetsFileList.Count - 1;
                     assetsFileListHash.Add(assetsFile.fileName);
 
                     // External lookup does recursive Directory.GetFiles scans. Skip it when
@@ -375,6 +394,11 @@ namespace AnimeStudio
 
         private void LoadAssetsFromMemory(FileReader reader, string originalPath, string unityVersion = null, long originalOffset = 0)
         {
+            if (!string.IsNullOrEmpty(originalPath)) {
+                var key = (Path.GetFullPath(originalPath).ToUpperInvariant(), originalOffset);
+                if (!bundleFiles.TryGetValue(key, out var names)) bundleFiles[key] = names = new(StringComparer.OrdinalIgnoreCase);
+                names.Add(reader.FileName);
+            }
             unityVersion = ResolveUnityVersionHint(originalPath, unityVersion);
             Logger.Verbose($"Loading asset file {reader.FileName} with version {unityVersion} from {originalPath} at offset 0x{originalOffset:X8}");
             if (!assetsFileListHash.Contains(reader.FileName))
@@ -390,7 +414,7 @@ namespace AnimeStudio
                     }
                     CheckStrippedVersion(assetsFile);
                     assetsFileList.Add(assetsFile);
-                    assetsFileIndexCache.Add(assetsFile.fileName, assetsFileList.Count - 1);
+                    assetsFileIndexCache[assetsFile.fileName] = assetsFileList.Count - 1;
                     assetsFileListHash.Add(assetsFile.fileName);
                 }
                 catch (Exception e)
@@ -621,7 +645,9 @@ namespace AnimeStudio
                     var total = stream.Length;
 
                     OffsetData.TryGetValue(reader.FileName, out var manualOffsets);
-                    bool isManualOffsets = (manualOffsets != null && manualOffsets.Count > 0) && Game.Type.IsArknightsEndfieldGroup();
+                    bool selectedGenshinOffsets = UseSelectedGenshinOffsets && Game.Type.IsGI() && manualOffsets?.Count > 0;
+                    bool isManualOffsets = (manualOffsets != null && manualOffsets.Count > 0) &&
+                        (Game.Type.IsArknightsEndfieldGroup() || selectedGenshinOffsets);
                     IEnumerable<long> offsetsEnumerable = isManualOffsets
                         ? manualOffsets
                         : stream.GetOffsets(reader.FullPath);
@@ -630,12 +656,15 @@ namespace AnimeStudio
                     int? manualTotal = (manualOffsets != null && manualOffsets.Count > 0) ? manualOffsets.Count : (int?)null;
                     foreach (var offset in offsetsEnumerable)
                     {
+                        // Match GetOffsets' cursor setup before FileReader probes
+                        // the bundle header. GI map offsets are absolute in the block.
+                        if (selectedGenshinOffsets) stream.Offset = offset;
                         var name = offset.ToString("X8");
                         Logger.Verbose($"Loading Block {name}");
 
                         var dummyPath = Path.Combine(Path.GetDirectoryName(reader.FullPath), name);
                         var subReader = new FileReader(dummyPath, stream, true);
-                        if (isManualOffsets)
+                        if (isManualOffsets && !selectedGenshinOffsets)
                             subReader.Position = offset;
                         LoadGameBlockFile(subReader, reader.FullPath, offset, false);
 
@@ -690,7 +719,7 @@ namespace AnimeStudio
                 if (file == null)
                     throw new Exception("Unsupported game block file type");
 
-                Logger.Verbose($"file total size: {file.m_Header.size:X8}");
+                Logger.Verbose($"file total size: {(object)file.m_Header.size:X8}");
                 foreach (var innerFile in file.fileList)
                 {
                     var dummyPath = Path.Combine(Path.GetDirectoryName(reader.FullPath), innerFile.fileName);
@@ -797,6 +826,7 @@ namespace AnimeStudio
             resourceFileReaders.Clear();
 
             assetsFileIndexCache.Clear();
+            bundleFiles.Clear();
         }
 
         public void Clear()
@@ -817,8 +847,10 @@ namespace AnimeStudio
 
             var progressCount = assetsFileList.Sum(x => x.m_Objects.Count);
             int i = 0;
+            var progressGate = new object();
+            void ReportRead() { lock (progressGate) Progress.Report(++i, progressCount); }
             Progress.Reset();
-            foreach (var assetsFile in assetsFileList)
+            void ReadFileObjects(SerializedFile assetsFile)
             {
                 foreach (var objectInfo in assetsFile.m_Objects)
                 {
@@ -826,6 +858,11 @@ namespace AnimeStudio
                     {
                         Logger.Info("Reading assets has been cancelled !!");
                         return;
+                    }
+                    if (assetsFile.ObjectsDic.ContainsKey(objectInfo.m_PathID))
+                    {
+                        ReportRead();
+                        continue;
                     }
                     var objectReader = new ObjectReader(assetsFile.reader, assetsFile, objectInfo, Game);
                     try
@@ -847,6 +884,10 @@ namespace AnimeStudio
                             ClassIDType.Mesh when ClassIDType.Mesh.CanParse() => new Mesh(objectReader),
                             ClassIDType.MeshFilter when ClassIDType.MeshFilter.CanParse() => new MeshFilter(objectReader),
                             ClassIDType.MeshRenderer when ClassIDType.MeshRenderer.CanParse() => new MeshRenderer(objectReader),
+                            ClassIDType.ParticleSystem when Game.Type.IsGI() => new GenshinParticleSystem(objectReader),
+                            ClassIDType.ParticleSystemRenderer when Game.Type.IsGI() => new GenshinParticleSystemRenderer(objectReader),
+                            ClassIDType.TrailRenderer when Game.Type.IsGI() => new GenshinTrailRenderer(objectReader),
+                            ClassIDType.LineRenderer when Game.Type.IsGI() => new GenshinTrailRenderer(objectReader),
                             ClassIDType.MiHoYoBinData when ClassIDType.MiHoYoBinData.CanParse() => new MiHoYoBinData(objectReader),
                             ClassIDType.MonoBehaviour when ClassIDType.MonoBehaviour.CanParse() => new MonoBehaviour(objectReader),
                             ClassIDType.MonoScript when ClassIDType.MonoScript.CanParse() => new MonoScript(objectReader),
@@ -859,6 +900,7 @@ namespace AnimeStudio
                             ClassIDType.SpriteAtlas when ClassIDType.SpriteAtlas.CanParse() => new SpriteAtlas(objectReader),
                             ClassIDType.TextAsset when ClassIDType.TextAsset.CanParse() => new TextAsset(objectReader),
                             ClassIDType.Texture2D when ClassIDType.Texture2D.CanParse() => new Texture2D(objectReader),
+                            ClassIDType.Cubemap when Game.Type.IsGI() => new Cubemap(objectReader),
                             ClassIDType.Transform when ClassIDType.Transform.CanParse() => new Transform(objectReader),
                             ClassIDType.VideoClip when ClassIDType.VideoClip.CanParse() => new VideoClip(objectReader),
                             ClassIDType.ResourceManager when ClassIDType.ResourceManager.CanParse() => new ResourceManager(objectReader),
@@ -879,9 +921,13 @@ namespace AnimeStudio
                         Logger.Error(sb.ToString());
                     }
 
-                    Progress.Report(++i, progressCount);
+                    ReportRead();
                 }
             }
+            if (Game.Type.IsGI() && ObjectReadWorkers > 1)
+                Parallel.ForEach(assetsFileList, new ParallelOptions { MaxDegreeOfParallelism = ObjectReadWorkers }, ReadFileObjects);
+            else
+                foreach (var file in assetsFileList) ReadFileObjects(file);
         }
 
         private void ProcessAssets()

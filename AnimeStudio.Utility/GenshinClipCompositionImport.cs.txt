@@ -1,0 +1,45 @@
+using System;
+using System.IO;
+using System.Linq;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEditor;
+using UnityEditor.AssetImporters;
+
+// Small source recipes; generated AnimationClips live in Unity's Library cache.
+// Keep this one importer in Generic/Editor when importing multiple characters.
+[ScriptedImporter(1, "genshinclip")]
+public class AnimeStudioClipCompositionImport : ScriptedImporter
+{
+    [Serializable] public class Recipe { public string name, body, secondary; }
+    public override void OnImportAsset(AssetImportContext context)
+    {
+        var recipe = JsonUtility.FromJson<Recipe>(File.ReadAllText(context.assetPath));
+        AnimationClip Load(string relative)
+        {
+            string full = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(context.assetPath), relative));
+            string assets = Path.GetFullPath("Assets") + Path.DirectorySeparatorChar;
+            if (!full.StartsWith(assets, StringComparison.OrdinalIgnoreCase)) throw new Exception("Composition dependency is outside Assets.");
+            string path = "Assets/" + full.Substring(assets.Length).Replace('\\', '/');
+            context.DependsOnSourceAsset(path);
+            context.DependsOnArtifact(path);
+            return AssetDatabase.LoadAssetAtPath<AnimationClip>(path) ?? throw new Exception("Missing composition dependency: " + path);
+        }
+        var body = Load(recipe.body); var secondary = Load(recipe.secondary);
+        if (Mathf.Abs(body.length-secondary.length) > .0001f || body.frameRate != secondary.frameRate)
+            throw new Exception("Composition clips have different timing or sample rates.");
+        var clip = new AnimationClip { name = recipe.name, frameRate = body.frameRate };
+        var curves = new Dictionary<EditorCurveBinding, AnimationCurve>();
+        var objects = new Dictionary<EditorCurveBinding, ObjectReferenceKeyframe[]>();
+        foreach (var input in new[] {body, secondary})
+        {
+            foreach (var binding in AnimationUtility.GetCurveBindings(input)) curves[binding] = AnimationUtility.GetEditorCurve(input,binding);
+            foreach (var binding in AnimationUtility.GetObjectReferenceCurveBindings(input)) objects[binding] = AnimationUtility.GetObjectReferenceCurve(input,binding);
+        }
+        AnimationUtility.SetEditorCurves(clip,curves.Keys.ToArray(),curves.Values.ToArray());
+        foreach (var pair in objects) AnimationUtility.SetObjectReferenceCurve(clip,pair.Key,pair.Value);
+        AnimationUtility.SetAnimationEvents(clip,AnimationUtility.GetAnimationEvents(body).Concat(AnimationUtility.GetAnimationEvents(secondary)).OrderBy(e=>e.time).ToArray());
+        AnimationUtility.SetAnimationClipSettings(clip,AnimationUtility.GetAnimationClipSettings(body));
+        context.AddObjectToAsset("clip",clip); context.SetMainObject(clip);
+    }
+}

@@ -39,17 +39,17 @@ namespace AnimeStudio
                 }
 
                 var currentDir = Directory.GetCurrentDirectory();
-                Directory.SetCurrentDirectory(dir.FullName);
-
-                var name = Path.GetFileName(path);
-
-                using (var exporter = new FbxExporter(name, imported, exportOptions))
+                try
                 {
-                    exporter.Initialize();
-                    exporter.ExportAll();
+                    Directory.SetCurrentDirectory(dir.FullName);
+                    var name = Path.GetFileName(path);
+                    using (var exporter = new FbxExporter(name, imported, exportOptions))
+                    {
+                        exporter.Initialize();
+                        exporter.ExportAll();
+                    }
                 }
-
-                Directory.SetCurrentDirectory(currentDir);
+                finally { Directory.SetCurrentDirectory(currentDir); }
             }
         }
 
@@ -62,6 +62,7 @@ namespace AnimeStudio
             public bool exportAnimations;
             public bool exportBlendShape;
             public bool castToBone;
+            public bool continuousBoneHierarchy;
             public int boneSize;
             public float scaleFactor;
             public int fbxVersion;

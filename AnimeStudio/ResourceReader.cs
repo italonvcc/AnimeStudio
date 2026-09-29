@@ -31,6 +31,12 @@ namespace AnimeStudio
 
         private BinaryReader GetReader()
         {
+            if (assetsFile == null) return reader;
+            lock (assetsFile.assetsManager.resourceFileReaders) return ResolveReader();
+        }
+
+        private BinaryReader ResolveReader()
+        {
             if (needSearch)
             {
                 var resourceFileName = Path.GetFileName(path);
@@ -67,24 +73,33 @@ namespace AnimeStudio
         public byte[] GetData()
         {
             var binaryReader = GetReader();
-            binaryReader.BaseStream.Position = offset;
-            return binaryReader.ReadBytes((int)size);
+            lock (binaryReader.BaseStream)
+            {
+                binaryReader.BaseStream.Position = offset;
+                return binaryReader.ReadBytes((int)size);
+            }
         }
 
         public void GetData(byte[] buff)
         {
             var binaryReader = GetReader();
-            binaryReader.BaseStream.Position = offset;
-            binaryReader.Read(buff, 0, (int)size);
+            lock (binaryReader.BaseStream)
+            {
+                binaryReader.BaseStream.Position = offset;
+                binaryReader.Read(buff, 0, (int)size);
+            }
         }
 
         public void WriteData(string path)
         {
             var binaryReader = GetReader();
-            binaryReader.BaseStream.Position = offset;
-            using (var writer = File.OpenWrite(path))
+            lock (binaryReader.BaseStream)
             {
-                binaryReader.BaseStream.CopyTo(writer, size);
+                binaryReader.BaseStream.Position = offset;
+                using (var writer = File.OpenWrite(path))
+                {
+                    binaryReader.BaseStream.CopyTo(writer, size);
+                }
             }
         }
     }

@@ -691,7 +691,9 @@ namespace AnimeStudio.GUI
 
             var settings = new JsonSerializerSettings();
             settings.Converters.Add(new StringEnumConverter());
-            var str = JsonConvert.SerializeObject(item.Asset, Formatting.Indented, settings);
+            var str = item.Asset is Material material && material.assetsFile.game.Type.IsGI()
+                ? MaterialJsonExporter.Serialize(material, settings)
+                : JsonConvert.SerializeObject(item.Asset, Formatting.Indented, settings);
             File.WriteAllText(exportFullPath, str);
             return true;
         }

@@ -32,6 +32,7 @@ namespace AnimeStudio
         public int m_Aniso;
         public float m_MipBias;
         public int m_WrapMode;
+        public int m_WrapV, m_WrapW;
 
         public GLTextureSettings(ObjectReader reader)
         {
@@ -47,12 +48,13 @@ namespace AnimeStudio
             if (version[0] >= 2017)//2017.x and up
             {
                 m_WrapMode = reader.ReadInt32(); //m_WrapU
-                int m_WrapV = reader.ReadInt32();
-                int m_WrapW = reader.ReadInt32();
+                m_WrapV = reader.ReadInt32();
+                m_WrapW = reader.ReadInt32();
             }
             else
             {
                 m_WrapMode = reader.ReadInt32();
+                m_WrapV = m_WrapW = m_WrapMode;
             }
             if (reader.Game.Type.IsArknightsEndfieldCB3() || reader.Game.Type.IsArknightsEndfield())
             {
@@ -73,12 +75,17 @@ namespace AnimeStudio
         public TextureFormat m_TextureFormat;
         public bool m_MipMap;
         public int m_MipCount;
+        public int m_ColorSpace = -1;
+        public int m_ImageCount;
+        public int m_TextureDimension;
         public GLTextureSettings m_TextureSettings;
         public ResourceReader image_data;
         public StreamingInfo m_StreamData;
 
-        private static bool HasGNFTexture(SerializedType type) => type.Match("1D52BB98AA5F54C67C22C39E8B2E400F");
-        private static bool HasExternalMipRelativeOffset(SerializedType type) => type.Match("1D52BB98AA5F54C67C22C39E8B2E400F", "5390A985F58D5524F95DB240E8789704");
+        // The last fingerprint is the observed GI 7.0 Cubemap layout, sharing
+        // these header fields with Texture2D; do not apply them to unknown layouts.
+        private static bool HasGNFTexture(SerializedType type) => type.Match("1D52BB98AA5F54C67C22C39E8B2E400F", "285F64E452C966AD1FFF6626784F3FA6");
+        private static bool HasExternalMipRelativeOffset(SerializedType type) => type.Match("1D52BB98AA5F54C67C22C39E8B2E400F", "5390A985F58D5524F95DB240E8789704", "285F64E452C966AD1FFF6626784F3FA6");
         private static bool TypeTreeHasField(SerializedType type, string fieldName)
         {
             if (type?.m_Type?.m_Nodes == null)
@@ -167,8 +174,8 @@ namespace AnimeStudio
             {
                 reader.AlignStream();
             }
-            var m_ImageCount = reader.ReadInt32();
-            var m_TextureDimension = reader.ReadInt32();
+            m_ImageCount = reader.ReadInt32();
+            m_TextureDimension = reader.ReadInt32();
             m_TextureSettings = new GLTextureSettings(reader);
             if (version[0] >= 3) //3.0 and up
             {
@@ -176,7 +183,7 @@ namespace AnimeStudio
             }
             if (version[0] > 3 || (version[0] == 3 && version[1] >= 5)) //3.5.0 and up
             {
-                var m_ColorSpace = reader.ReadInt32();
+                m_ColorSpace = reader.ReadInt32();
             }
             var hasPlatformBlob = reader.Game.Type != GameType.AFKJourney || TypeTreeHasField(reader.serializedType, "m_PlatformBlob");
             if (hasPlatformBlob && (version[0] > 2020 || (version[0] == 2020 && version[1] >= 2))) //2020.2 and up

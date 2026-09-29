@@ -47,6 +47,7 @@ namespace AnimeStudio.GUI
             var openFileDialog = new OpenFileDialog() { Multiselect = false, Filter = "MessagePack AssetMap File|*.map|JSON AssetMap File|*.json" };
             if (openFileDialog.ShowDialog(this) == DialogResult.OK)
             {
+                Enabled = false;
                 try
                 {
                     var path = openFileDialog.FileName;
@@ -64,11 +65,13 @@ namespace AnimeStudio.GUI
                     _firstAssetEntries.AddRange(ResourceMap.GetEntries());
 
                     updateDisplay();
+                    await _parent.OnGenshinAssetMapLoaded(path, _firstAssetEntries);
                 }
                 catch (Exception ex)
                 {
                     Logger.Error($"Failed to load map : {ex.ToString()}");
                 }
+                finally { Enabled = true; }
             }
             loadAssetMap.Enabled = true;
         }
@@ -178,7 +181,7 @@ namespace AnimeStudio.GUI
             updateButtons();
             Logger.Info($"Cleared !!");
         }
-        private void loadSelected_Click(object sender, EventArgs e)
+        private async void loadSelected_Click(object sender, EventArgs e)
         {
             var files = assetDataGridView.SelectedRows.Cast<DataGridViewRow>()
             .Select(x => _assetEntries[x.Index])
@@ -195,7 +198,7 @@ namespace AnimeStudio.GUI
 
             var filePaths = files.Select(x => x.Source).ToHashSet();
 
-            var missingFiles = filePaths.Where(x => !File.Exists(x));
+            var missingFiles = filePaths.Where(x => !File.Exists(x)).ToArray();
             foreach (var file in missingFiles)
             {
                 Logger.Warning($"Unable to find file {file}, skipping...");
@@ -206,10 +209,12 @@ namespace AnimeStudio.GUI
             {
                 Logger.Info("Loading...");
                 bringMainToFront();
-                _parent.Invoke(() => _parent.updateGame(ResourceMap.GetGameType()));
-                _parent.Invoke(() => _parent.LoadPaths(files, filePaths.ToArray()));
+                try { await _parent.LoadSelectedPathsAsync(ResourceMap.GetGameType(), files, filePaths.ToArray()); }
+                catch (Exception ex) { MessageBox.Show(this, ex.ToString(), "Loading selected assets failed"); }
             }
         }
+        internal AssetEntry[] GetSelectedMapEntries() => assetDataGridView.SelectedRows.Cast<DataGridViewRow>()
+            .Select(row => _assetEntries[row.Index]).ToArray();
         private async void exportSelected_Click(object sender, EventArgs e)
         {
             var saveFolderDialog = new OpenFolderDialog();
@@ -513,12 +518,14 @@ namespace AnimeStudio.GUI
         }
         private void AssetBrowser_FormClosing(object sender, FormClosingEventArgs e)
         {
-            Clear();
+            // The main view can still export its loaded Animator using its map snapshot.
+            Clear(clearCharacterReferences: false);
             base.OnClosing(e);
         }
-        public void Clear()
+        public void Clear(bool clearCharacterReferences = true)
         {
             ResourceMap.Clear();
+            if (clearCharacterReferences) _parent.ClearGenshinReferences();
             _assetEntries.Clear();
             assetDataGridView.Rows.Clear();
         }
