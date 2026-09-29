@@ -32,6 +32,7 @@ namespace AnimeStudio
         public int m_Aniso;
         public float m_MipBias;
         public int m_WrapMode;
+        public int m_WrapV, m_WrapW;
 
         public GLTextureSettings(ObjectReader reader)
         {
@@ -47,12 +48,13 @@ namespace AnimeStudio
             if (version[0] >= 2017)//2017.x and up
             {
                 m_WrapMode = reader.ReadInt32(); //m_WrapU
-                int m_WrapV = reader.ReadInt32();
-                int m_WrapW = reader.ReadInt32();
+                m_WrapV = reader.ReadInt32();
+                m_WrapW = reader.ReadInt32();
             }
             else
             {
                 m_WrapMode = reader.ReadInt32();
+                m_WrapV = m_WrapW = m_WrapMode;
             }
             if (reader.Game.Type.IsArknightsEndfieldCB3() || reader.Game.Type.IsArknightsEndfield())
             {
@@ -73,6 +75,7 @@ namespace AnimeStudio
         public TextureFormat m_TextureFormat;
         public bool m_MipMap;
         public int m_MipCount;
+        public int m_ColorSpace = -1;
         public int m_ImageCount;
         public int m_TextureDimension;
         public GLTextureSettings m_TextureSettings;
@@ -180,7 +183,7 @@ namespace AnimeStudio
             }
             if (version[0] > 3 || (version[0] == 3 && version[1] >= 5)) //3.5.0 and up
             {
-                var m_ColorSpace = reader.ReadInt32();
+                m_ColorSpace = reader.ReadInt32();
             }
             var hasPlatformBlob = reader.Game.Type != GameType.AFKJourney || TypeTreeHasField(reader.serializedType, "m_PlatformBlob");
             if (hasPlatformBlob && (version[0] > 2020 || (version[0] == 2020 && version[1] >= 2))) //2020.2 and up

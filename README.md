@@ -1,5 +1,9 @@
 # Anime Studio
 
+Fork implementation notes: [shader-study exporter changes, 2026-09-28](docs/shader-study-exporter-changes-2026-09-28.md) document the current uncommitted FBX, shader-metadata and native-texture changes, validation and limits.
+
+Genshin asset research, analysis tools, and reproduction steps are in the [Genshin study](docs/Genshin/README.md). Production exporter changes and their Unity import lessons remain documented in AnimeStudio's main `docs/` directory. Shader implementation and rendering validation live in the separate [com.caladan.shaders package](https://github.com/italonvcc/com.caladan.shaders).
+
 ## Asset extraction tool for unity games !
 
 ![image](https://github.com/user-attachments/assets/fc1decdc-a589-43a2-b965-2d8151d0975f)

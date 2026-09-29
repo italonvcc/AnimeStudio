@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -58,6 +58,20 @@ namespace AnimeStudio
             if (exportMaterials) Directory.CreateDirectory(materials);
             foreach (var material in options.materials)
                 File.WriteAllText(Path.Combine(materials, SafeName(material.Name) + "_" + material.m_PathID + ".json"), MaterialJsonExporter.Serialize(material, settings));
+            // Keep original GPU mip chains beside preview PNGs. The optional
+            // AssetStudio native texture importer consumes these companions;
+            // unsupported layouts remain explicitly listed, never mislabeled.
+            var nativeTextures = options.materials.SelectMany(m => m.m_SavedProperties.m_TexEnvs)
+                .Select(p => p.Value.m_Texture.TryGet(out var t) ? t as Texture : null)
+                .Where(t => t != null).Distinct()
+                .Select(t => UnityTexturePayload.Export(t,Path.Combine(destination,"NativeTextures"))).ToArray();
+            File.WriteAllText(Path.Combine(destination,"native-texture-export.json"),JsonConvert.SerializeObject(nativeTextures,Formatting.Indented));
+            File.WriteAllText(Path.Combine(destination,"NATIVE-TEXTURES.txt"),
+                "NativeTextures/*.astexture preserves original Windows 2D/cubemap GPU bytes and every authored mip. " +
+                "These optional companions require AssetStudioNativeTextureImporter from the com.caladan.shaders Unity package. " +
+                "Keep NativeTextures beside this model and its Materials JSON; the AssetStudio FBX material binder prefers them over PNG previews. " +
+                "Without that importer, continue using the PNG files. Unsupported formats/layouts are listed in native-texture-export.json. " +
+                "Native companions are not platform-transcoded; the destination GPU must support their format.\n");
             var sourceClips = new List<object>();
             if (clips?.Length > 0)
             {

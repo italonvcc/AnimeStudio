@@ -31,7 +31,7 @@ namespace AnimeStudio
                     human = names.GetValueOrDefault(i, ""), position = V(pose.t), scale = V(pose.s), rotation = new { x = pose.q.X, y = pose.q.Y, z = pose.q.Z, w = pose.q.W },
                     axes = axes == null ? null : new { min = V(axes.m_Limit.m_Min), max = V(axes.m_Limit.m_Max), length = axes.m_Length } };
             }).ToArray();
-            var info = new { character, model = Path.GetFileName(model), nodes, humanScale = h.m_Scale,
+            var info = new { character, model = Path.GetFileName(model), authoredTangentBasis = true, nodes, humanScale = h.m_Scale,
                 armTwist = h.m_ArmTwist, foreArmTwist = h.m_ForeArmTwist, upperLegTwist = h.m_UpperLegTwist, legTwist = h.m_LegTwist,
                 armStretch = h.m_ArmStretch, legStretch = h.m_LegStretch, feetSpacing = h.m_FeetSpacing, hasTranslationDoF = h.m_HasTDoF,
                 clips = clips.Select(c => new { name = c.Name, file = "Animations/" + Safe(c.Name) + "_" + c.m_PathID + ".anim",

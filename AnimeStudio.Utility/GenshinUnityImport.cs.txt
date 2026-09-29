@@ -17,9 +17,25 @@ public class AnimeStudioCharacterImport : AssetPostprocessor
     [Serializable] public class TextureFile { public string name, file; }
     [Serializable] public class MaterialTexture { public string name; public int destination; public Vector2 offset, scale; }
     [Serializable] public class PreviewMaterial { public string name; public MaterialTexture[] textures; }
-    [Serializable] public class Recipe { public string character, model; public Node[] nodes; public Clip[] clips; public TextureFile[] textures; public PreviewMaterial[] previewMaterials; public float humanScale, armTwist, foreArmTwist, upperLegTwist, legTwist, armStretch, legStretch, feetSpacing; public bool hasTranslationDoF; }
+    [Serializable] public class Recipe { public bool authoredTangentBasis; public string character, model; public Node[] nodes; public Clip[] clips; public TextureFile[] textures; public PreviewMaterial[] previewMaterials; public float humanScale, armTwist, foreArmTwist, upperLegTwist, legTwist, armStretch, legStretch, feetSpacing; public bool hasTranslationDoF; }
     [Serializable] public class Report { public bool success; public string error, prefab; public float humanScale; public int clips, meshes, composedPairs, textureAssignments, exportedMaterials; public string[] missingCurvePaths, disabledObjects; }
-    public override uint GetVersion() => 2;
+    public override uint GetVersion() => 3;
+    void OnPreprocessModel()
+    {
+        string folder = Path.GetDirectoryName(assetPath).Replace('\\', '/');
+        if (!Directory.Exists(folder)) return;
+        foreach (string path in Directory.GetFiles(folder, "*.character.json"))
+        {
+            var recipe = JsonUtility.FromJson<Recipe>(File.ReadAllText(path));
+            if (recipe == null || !recipe.authoredTangentBasis || Path.GetFileName(assetPath) != recipe.model) continue;
+            // New exports contain a complete tangent/binormal layer. Preserve
+            // authored directions instead of replacing them with UV tangents.
+            // Older recipes keep their import policy until they are re-exported.
+            var importer = (ModelImporter)assetImporter;
+            importer.importNormals = ModelImporterNormals.Import;
+            importer.importTangents = ModelImporterTangents.Import;
+        }
+    }
     void OnPostprocessModel(GameObject model)
     {
         string folder = Path.GetDirectoryName(assetPath).Replace('\\', '/');

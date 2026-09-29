@@ -656,6 +656,9 @@ namespace AnimeStudio
 
     public class SerializedSubProgram
     {
+        // Preserved reserved bytes in GI 7.1 type 8EA866E8. Their semantics are
+        // unknown; nonzero data must fail rather than be interpreted as empty.
+        public byte[] m_UnresolvedGenshin71ProgramExtension;
         public uint m_BlobIndex;
         public ParserBindChannels m_Channels;
         public ushort[] m_KeywordIndices;
@@ -671,10 +674,10 @@ namespace AnimeStudio
         public List<UAVParameter> m_UAVParams;
         public List<SamplerParameter> m_Samplers;
 
-        public static bool HasGlobalLocalKeywordIndices(SerializedType type) => type.Match("E99740711222CD922E9A6F92FF1EB07A", "450A058C218DAF000647948F2F59DA6D", "B239746E4EC6E4D6D7BA27C84178610A", "3FD560648A91A99210D5DDF2BE320536", "66839B5040F09A101A02DDDC9E522F23", "0B07D09734C07EBABF387D3CBC8BEBF0");
-        public static bool HasInstancedStructuredBuffers(SerializedType type) => type.Match("E99740711222CD922E9A6F92FF1EB07A", "B239746E4EC6E4D6D7BA27C84178610A", "3FD560648A91A99210D5DDF2BE320536", "66839B5040F09A101A02DDDC9E522F23", "0B07D09734C07EBABF387D3CBC8BEBF0");
-        public static bool HasIsAdditionalBlob(SerializedType type) => type.Match("B239746E4EC6E4D6D7BA27C84178610A", "66839B5040F09A101A02DDDC9E522F23", "0B07D09734C07EBABF387D3CBC8BEBF0");
-        public static bool HasProgramHash(SerializedType type) => type.Match("66839B5040F09A101A02DDDC9E522F23", "0B07D09734C07EBABF387D3CBC8BEBF0");
+        public static bool HasGlobalLocalKeywordIndices(SerializedType type) => type.Match("E99740711222CD922E9A6F92FF1EB07A", "450A058C218DAF000647948F2F59DA6D", "B239746E4EC6E4D6D7BA27C84178610A", "3FD560648A91A99210D5DDF2BE320536", "66839B5040F09A101A02DDDC9E522F23", "0B07D09734C07EBABF387D3CBC8BEBF0", "8EA866E8248B6A3228054C208F671D38");
+        public static bool HasInstancedStructuredBuffers(SerializedType type) => type.Match("E99740711222CD922E9A6F92FF1EB07A", "B239746E4EC6E4D6D7BA27C84178610A", "3FD560648A91A99210D5DDF2BE320536", "66839B5040F09A101A02DDDC9E522F23", "0B07D09734C07EBABF387D3CBC8BEBF0", "8EA866E8248B6A3228054C208F671D38");
+        public static bool HasIsAdditionalBlob(SerializedType type) => type.Match("B239746E4EC6E4D6D7BA27C84178610A", "66839B5040F09A101A02DDDC9E522F23", "0B07D09734C07EBABF387D3CBC8BEBF0", "8EA866E8248B6A3228054C208F671D38");
+        public static bool HasProgramHash(SerializedType type) => type.Match("66839B5040F09A101A02DDDC9E522F23", "0B07D09734C07EBABF387D3CBC8BEBF0", "8EA866E8248B6A3228054C208F671D38");
 
         public SerializedSubProgram(ObjectReader reader)
         {
@@ -730,6 +733,10 @@ namespace AnimeStudio
                 m_GpuProgramType = (ShaderGpuProgramType)reader.ReadSByte();
                 reader.AlignStream();
             }
+
+            if (reader.serializedType.Match("8EA866E8248B6A3228054C208F671D38") &&
+                (!Enum.IsDefined(typeof(ShaderGpuProgramType), m_GpuProgramType) || m_GpuProgramType == ShaderGpuProgramType.Unknown || m_ShaderHardwareTier < 0 || m_ShaderHardwareTier > 3))
+                throw new InvalidDataException("Unverified GI subprogram at " + (reader.Position-reader.byteStart) + ": tier " + m_ShaderHardwareTier + ", GPU " + m_GpuProgramType);
 
             if ((version[0] == 2020 && version[1] > 3) ||
                (version[0] == 2020 && version[1] == 3 && version[2] >= 2) || //2020.3.2f1 and up
@@ -831,6 +838,12 @@ namespace AnimeStudio
                         m_InstancedStructuredBuffers.Add(new ConstantBuffer(reader));
                     }
                 }
+                if (reader.serializedType.Match("8EA866E8248B6A3228054C208F671D38"))
+                {
+                    m_UnresolvedGenshin71ProgramExtension = reader.ReadBytes(20);
+                    if (m_UnresolvedGenshin71ProgramExtension.Length != 20 || m_UnresolvedGenshin71ProgramExtension.Any(value => value != 0))
+                        throw new InvalidDataException("Unsupported GI 7.1 shader subprogram extension");
+                }
             }
         }
     }
@@ -925,6 +938,9 @@ namespace AnimeStudio
 
     public class SerializedPass
     {
+        // Preserved reserved bytes in GI 7.1 type 8EA866E8. Their semantics are
+        // unknown; nonzero data must fail rather than be interpreted as empty.
+        public byte[] m_UnresolvedGenshin71ProgramExtension;
         public List<Hash128> m_EditorDataHash;
         public byte[] m_Platforms;
         public ushort[] m_LocalKeywordMask;
@@ -985,6 +1001,16 @@ namespace AnimeStudio
             progGeometry = new SerializedProgram(reader);
             progHull = new SerializedProgram(reader);
             progDomain = new SerializedProgram(reader);
+            // GI 7.1 has three reserved zero words AFTER the known stage
+            // programs and BEFORE the instancing flag and strings. Treating
+            // them as a pass tail only happened to work for non-instanced
+            // passes with empty strings; Character_Glass exposed that offset.
+            if (reader.serializedType.Match("8EA866E8248B6A3228054C208F671D38"))
+            {
+                m_UnresolvedGenshin71ProgramExtension = reader.ReadBytes(12);
+                if (m_UnresolvedGenshin71ProgramExtension.Length != 12 || m_UnresolvedGenshin71ProgramExtension.Any(value => value != 0))
+                    throw new InvalidDataException("Unsupported GI 7.1 shader pass extension");
+            }
             if (version[0] > 2019 || (version[0] == 2019 && version[1] >= 3)) //2019.3 and up
             {
                 progRayTracing = new SerializedProgram(reader);

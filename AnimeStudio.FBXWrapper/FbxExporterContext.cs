@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -282,17 +282,13 @@ namespace AnimeStudio.FbxInterop
 
                 AsFbxMeshInitControlPoints(mesh, importedMesh.VertexList.Count);
 
+                // The polygon API writes material indices to layer zero. Create
+                // that layer before extra UV sets allocate additional layers.
+                AsFbxMeshCreateElementMaterial(mesh);
+
                 if (importedMesh.hasNormal)
                 {
                     AsFbxMeshCreateElementNormal(mesh);
-                }
-
-                for (int i = 0; i < importedMesh.hasUV.Length; i++)
-                {
-                    if (!importedMesh.hasUV[i]) { continue; }
-
-                    var type = importedMesh.uvType[i];
-                    AsFbxMeshCreateUV(mesh, i, type);
                 }
 
                 if (importedMesh.hasTangent)
@@ -305,7 +301,20 @@ namespace AnimeStudio.FbxInterop
                     AsFbxMeshCreateElementVertexColor(mesh);
                 }
 
-                AsFbxMeshCreateElementMaterial(mesh);
+                // Create single authored channels before adding UV layers.
+                // The SDK's CreateElement helpers otherwise attach extra layer
+                // references for tangents/binormals/colors. Unity can select an
+                // empty secondary element even though the FBX contains the data.
+                // All vertex writes below target element zero; keep its binding
+                // on the base layer, just like normals and polygon materials.
+                for (int i = 0; i < importedMesh.hasUV.Length; i++)
+                {
+                    if (!importedMesh.hasUV[i]) { continue; }
+
+                    var type = importedMesh.uvType[i];
+                    AsFbxMeshCreateUV(mesh, i, type);
+                }
+
 
                 foreach (var meshObj in importedMesh.SubmeshList)
                 {

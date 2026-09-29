@@ -527,6 +527,16 @@ AS_API(void) AsFbxMeshCreateElementTangent(FbxMesh* pMesh)
 	auto pTangent = pMesh->CreateElementTangent();
 	pTangent->SetMappingMode(FbxGeometryElement::eByControlPoint);
 	pTangent->SetReferenceMode(FbxGeometryElement::eDirect);
+
+	// Unity's FBX importer requires the matching binormal layer before it
+	// imports tangents. Keep the authored tangent direction: games may store
+	// smooth outline directions here instead of a UV tangent basis.
+	if (pMesh->GetElementNormalCount() > 0)
+	{
+		auto pBinormal = pMesh->CreateElementBinormal();
+		pBinormal->SetMappingMode(FbxGeometryElement::eByControlPoint);
+		pBinormal->SetReferenceMode(FbxGeometryElement::eDirect);
+	}
 }
 
 AS_API(void) AsFbxMeshCreateElementVertexColor(FbxMesh* pMesh)
@@ -629,7 +639,10 @@ AS_API(void) AsFbxMeshAddPolygon(FbxMesh* pMesh, int32_t materialIndex, int32_t 
 		return;
 	}
 
-	pMesh->BeginPolygon(materialIndex);
+	// Materials are assigned through the explicit eByPolygon layer above.
+	// Legacy mode creates obsolete per-texture material layers for extra UV
+	// sets; FBX importers can then lose the real polygon material assignments.
+	pMesh->BeginPolygon(materialIndex, -1, -1, false);
 	pMesh->AddPolygon(index0);
 	pMesh->AddPolygon(index1);
 	pMesh->AddPolygon(index2);
@@ -671,8 +684,23 @@ AS_API(void) AsFbxMeshElementTangentAdd(FbxMesh* pMesh, int32_t elementIndex, fl
 
 	auto pElem = pMesh->GetElementTangent(elementIndex);
 	auto& array = pElem->GetDirectArray();
+	const int controlPoint = array.GetCount();
+	const FbxVector4 tangent(x, y, z, w);
+	array.Add(tangent);
 
-	array.Add(FbxVector4(x, y, z, w));
+	auto pNormal = pMesh->GetElementNormal(elementIndex);
+	auto pBinormal = pMesh->GetElementBinormal(elementIndex);
+	if (pNormal != nullptr && pBinormal != nullptr &&
+		controlPoint < pNormal->GetDirectArray().GetCount())
+	{
+		// Normal and tangent are already in export coordinates. Their cross
+		// product, multiplied by tangent handedness, completes the FBX basis.
+		// Do not orthogonalize or normalize the stored tangent: that would
+		// destroy authored outline vectors used by character shaders.
+		FbxVector4 binormal = pNormal->GetDirectArray().GetAt(controlPoint).CrossProduct(tangent) * w;
+		binormal[3] = 0;
+		pBinormal->GetDirectArray().Add(binormal);
+	}
 }
 
 AS_API(void) AsFbxMeshElementVertexColorAdd(FbxMesh* pMesh, int32_t elementIndex, float r, float g, float b, float a)

@@ -7,14 +7,15 @@
 
 ## Responsibilities and current scope
 - AnimeStudio owns production extraction, file parsing, dependency resolution, model/animation/material/audio/VFX export, and the GUI/CLI controls for them.
-- Put research notes, long-form project documentation, external tools, and analysis scripts in sibling `genshin_asset_study`. Consult its README.md and docs/phase-1.md for scope and acceptance criteria.
+- Keep canonical technical documentation for AnimeStudio changes in this repository: what changed, why it changed, source-to-export-to-Unity diagnosis, provenance, validation, and lessons about importing exported assets into Unity. General Genshin asset knowledge, analysis scripts, and external research tools live under [docs/Genshin/](docs/Genshin/); they may summarize an AnimeStudio change and link to its full technical account here.
 - Phase 1: Wonderland Manekin parts; complete character animation; named character voices/combat sounds; per-character VFX; resolved shader identity in materials.
 - Export native Unity `.anim` with source Avatar metadata and a model FBX. The latest user direction removes humanoid FBX baking and defers the new mannequin exporter.
 - Surface implemented game-specific export actions based on the selected game (Genshin first), while retaining shared behavior for other games. Do not present unfinished research as a working exporter.
-- Phase 2 Unity scenes/shader recreation are deferred until Phase 1 is complete and the user supplies the Unity project.
+- Update 2026-09-28: the user has supplied a Unity project and authorized shader work in the separate `italonvcc/com.caladan.shaders` repository. That repository owns the usable Unity setup, Editor tools, shader documentation, and shader agent rules; it is distinct from the local Unity project. Keep exporter fixes and their technical rationale here. Genshin-specific asset findings belong under `docs/Genshin/`, with concise cross-links where useful. Do not duplicate full technical documents.
+- Detailed exporter patch documentation is kept here in [docs/shader-study-exporter-changes-2026-09-28.md](docs/shader-study-exporter-changes-2026-09-28.md). Preserve the uncommitted implementation and read its validation limits before continuing.
 
 ## Implementation and validation
-- Treat the installed game client as read-only. Use the study repo's ignored Export/ and Maps/ for output and local reference data. Never overwrite the supplied Mona regression export.
+- Treat the installed game client as read-only. Use ignored `docs/Genshin/Export/` and `docs/Genshin/Maps/` for study output and local reference data. Never overwrite the supplied Mona regression export.
 - Preserve source/container/path IDs, skeleton/bind pose, animation timing/root motion, event/language identity, and material/shader dependencies. Report missing information instead of guessing names or silently claiming full export.
 - Keep parsing in AnimeStudio, conversion in AnimeStudio.Utility, and GUI orchestration in AnimeStudio.GUI. Reuse the same conversion logic in CLI and GUI where possible.
 - Windows GUI build: `dotnet build AnimeStudio.GUI/AnimeStudio.GUI.csproj -f net10.0-windows`. Build the CLI too if shared export behavior changes. Native libraries are prebuilt; rebuild only for native changes.
