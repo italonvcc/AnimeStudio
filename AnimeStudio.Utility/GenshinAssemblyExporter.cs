@@ -21,7 +21,12 @@ namespace AnimeStudio
                 if (type is not (ClassIDType.Animator or ClassIDType.GameObject)) throw new InvalidDataException("Root must be Animator/GameObject.");
                 string name = (string)selector["name"];
                 long id = long.Parse((string)selector["pathID"]);
-                return map.Single(e => e.Type == type && e.Name == name && e.PathID == id);
+                string source = (string)selector["source"];
+                var matches = map.Where(e => e.Type == type && e.Name == name && e.PathID == id &&
+                    (source == null || string.Equals(e.Source, source, StringComparison.OrdinalIgnoreCase))).ToArray();
+                if (matches.Length != 1)
+                    throw new InvalidDataException($"Expected one {type} {name}@{id} source record; found {matches.Length}. Supply the exact source path when repeated across bundles.");
+                return matches[0];
             }
             var rootEntry = Select(request["base"]);
             var partEntries = parts.Select(p => Select(p["root"])).ToArray();

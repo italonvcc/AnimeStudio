@@ -41,9 +41,11 @@ The [official wiki](https://github.com/Escartem/AnimeStudio/wiki) goes into deta
 
 # Building
 
-You need Visual Studio 2022 with the C++ desktop workload and the .NET 9 and 10 SDKs.
+Use the .NET 10 SDK. Rebuilding native libraries additionally requires Visual Studio with the C++ desktop workload and the listed native dependencies.
 
-`build.ps1` builds the GUI and the CLI for both frameworks and packages them into `dist`. That's the same script the CI runs, so if it works there it works locally. For day to day work `dotnet build AnimeStudio.GUI` is enough, the packaging step is only needed for a release.
+Run `./build.ps1` for the single current Release distribution: `dist/net10.0-windows`. Launch `AnimeStudio.GUI.exe` there; the matching `AnimeStudio.CLI.exe` uses the same `bin/` dependencies. The script publishes current working-tree source into clean staging, verifies the native FBX library hash and CLI startup, and records payload hashes in `build-manifest.json`. Build logs and previous-distribution backups live in ignored `artifacts/build-records/`. Use this folder rather than old project `bin/Debug` or `bin/Release` copies. Both launchers require the .NET 10 Windows Desktop runtime.
+
+Genshin model, character and weapon exports carry a versioned `anime-studio-import.json` beside each FBX and its source-backed recipe. Install the `com.caladan.shaders` Unity package to import these exports; AnimeStudio no longer places Unity Editor scripts inside export folders. See [the import descriptor contract](docs/Genshin/Unity-Import-Descriptor.md).
 
 The native libraries are not built by that script, they sit prebuilt in `AnimeStudio.Libraries` and only need rebuilding when you touch their sources. Each one is its own project in the solution and outputs straight into that folder :
 

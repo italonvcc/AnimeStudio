@@ -339,3 +339,7 @@ ASALocalRun/
 
 # BeatPulse healthcheck temp database
 healthchecksdb
+
+# Local Genshin export evidence and maps
+/docs/Genshin/Export/
+/docs/Genshin/Maps/

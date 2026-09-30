@@ -136,6 +136,13 @@ namespace AnimeStudio
         private static bool HasEnabledPassMask(SerializedType type) => type.Match("6BDB1CD05E80C82ABB24930CD37AEE88");
 
         public PPtr<Shader> m_Shader;
+        // Keep the serialized keyword state. Material floats do not tell us which
+        // shader variant Unity selected (for example, a disabled noise keyword
+        // can coexist with a nonzero _NoiseToggle value).
+        public string m_ShaderKeywords;
+        public string[] m_LegacyShaderKeywords;
+        public string[] m_ValidKeywords;
+        public string[] m_InvalidKeywords;
         public UnityPropertySheet m_SavedProperties;
 
         public Material(ObjectReader reader) : base(reader)
@@ -144,7 +151,7 @@ namespace AnimeStudio
 
             if (version[0] == 4 && version[1] >= 1) //4.x
             {
-                var m_ShaderKeywords = reader.ReadStringArray();
+                m_LegacyShaderKeywords = reader.ReadStringArray();
             }
 
             if (reader.Game.Type.IsRewindingCadence())
@@ -154,12 +161,12 @@ namespace AnimeStudio
 
             if (version[0] > 2021 || (version[0] == 2021 && version[1] >= 3)) //2021.3 and up
             {
-                var m_ValidKeywords = reader.ReadStringArray();
-                var m_InvalidKeywords = reader.ReadStringArray();
+                m_ValidKeywords = reader.ReadStringArray();
+                m_InvalidKeywords = reader.ReadStringArray();
             }
             else if (version[0] >= 5) //5.0 ~ 2021.2
             {
-                var m_ShaderKeywords = reader.ReadAlignedString();
+                m_ShaderKeywords = reader.ReadAlignedString();
             }
 
             if (version[0] >= 5) //5.0 and up

@@ -56,6 +56,42 @@ namespace AnimeStudio
                 catch (ArgumentException) { }
                 catch (OverflowException) { }
             }
+            return result ?? TryReadTaggedName(data);
+        }
+
+        // Current GI 2017 character shaders can leave ParsedForm.m_Name empty even
+        // when a later serialized name is present. Accept only a unique aligned
+        // name immediately following the RenderType=Opaque tag pair and a bounded
+        // header. This is source metadata, not a name guessed from material fields.
+        private static string TryReadTaggedName(byte[] data)
+        {
+            ReadOnlySpan<byte> prefix = "miHoYo/"u8;
+            string result = null;
+            for (int start = 36; start < data.Length - prefix.Length; start += 4)
+            {
+                if (!data.AsSpan(start).StartsWith(prefix)) continue;
+                try
+                {
+                    if (ReadUInt(data, start - 36) != 10 ||
+                        !data.AsSpan(start - 32, 10).SequenceEqual("RenderType"u8) ||
+                        ReadUInt(data, start - 20) != 6 ||
+                        !data.AsSpan(start - 16, 6).SequenceEqual("Opaque"u8) ||
+                        ReadUInt(data, start - 8) != 0) continue;
+                    int length = checked((int)ReadUInt(data, start - 4));
+                    if (length is < 8 or > 256 || length > data.Length - start) continue;
+                    int position = start - 4;
+                    string name = ReadString(data, ref position);
+                    if (!name.StartsWith("miHoYo/", StringComparison.Ordinal) ||
+                        position + 20 > data.Length || ReadUInt(data, position) != 0 ||
+                        ReadUInt(data, position + 4) != 0 || ReadUInt(data, position + 8) != 0 ||
+                        ReadUInt(data, position + 12) != 0 ||
+                        ReadUInt(data, position + 16) is < 1 or > 8) continue;
+                    if (result != null) return null;
+                    result = name;
+                }
+                catch (ArgumentException) { }
+                catch (OverflowException) { }
+            }
             return result;
         }
 

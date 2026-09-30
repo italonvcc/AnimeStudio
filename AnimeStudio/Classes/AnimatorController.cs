@@ -846,13 +846,17 @@ namespace AnimeStudio
 
     public sealed class AnimatorController : RuntimeAnimatorController
     {
+        // Retain the state/layer/blend-tree data already parsed here. Exporters
+        // can preserve this evidence without pretending it is a Unity controller.
+        public uint m_ControllerSize;
+        public ControllerConstant m_Controller;
         public Dictionary<uint, string> m_TOS;
         public List<PPtr<AnimationClip>> m_AnimationClips;
 
         public AnimatorController(ObjectReader reader) : base(reader)
         {
-            var m_ControllerSize = reader.ReadUInt32();
-            var m_Controller = new ControllerConstant(reader);
+            m_ControllerSize = reader.ReadUInt32();
+            m_Controller = new ControllerConstant(reader);
 
             int tosSize = reader.ReadInt32();
             m_TOS = new Dictionary<uint, string>();

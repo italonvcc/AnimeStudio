@@ -1233,9 +1233,10 @@ namespace AnimeStudio
         public ShaderPlatformInfos[] platformInfos;
 
         private string recoveredName;
+        private string recoveredNameSource;
         public override string Name => recoveredName ?? m_ParsedForm?.m_Name ?? m_Name;
         public string NameSource => !string.IsNullOrEmpty(m_ParsedForm?.m_Name) ? "ParsedShader" :
-            !string.IsNullOrEmpty(m_Name) ? "NamedObject" : recoveredName != null ? "ValidatedGenshinFooter" : "Unavailable";
+            !string.IsNullOrEmpty(m_Name) ? "NamedObject" : recoveredNameSource ?? "Unavailable";
         // public static bool HasPlatformInfos(SerializedType type) => type.Match("D114ED797139152A2E4A42339CF4AA8E"); // Star Rail
 
         public Shader(ObjectReader reader) : base(reader)
@@ -1266,9 +1267,18 @@ namespace AnimeStudio
                     {
                         recoveredName = GenshinShaderNameReader.TryRead(GetRawData());
                         if (recoveredName != null)
+                        {
+                            recoveredNameSource = "ValidatedGenshinSerializedName";
                             Logger.Warning($"Recovered shader identity {recoveredName} from a validated footer; shader program parsing remains incomplete.");
+                        }
                     }
                     return;
+                }
+                if (reader.Game.Type.IsGI() && version[0] == 2017 &&
+                    string.IsNullOrEmpty(m_ParsedForm?.m_Name) && byteSize <= 128 * 1024 * 1024)
+                {
+                    recoveredName = GenshinShaderNameReader.TryRead(GetRawData());
+                    if (recoveredName != null) recoveredNameSource = "ValidatedGenshinSerializedName";
                 }
                 if (reader.Game.Type.IsArknightsEndfieldCB3() || reader.Game.Type.IsArknightsEndfield())
                 {

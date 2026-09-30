@@ -11,6 +11,10 @@ namespace AnimeStudio
     {
         public List<PPtr<Component>> m_Components;
         public string m_Name;
+        // GI's 2017 serialized GameObject stores the tag and active flag after
+        // its aligned name. Keep these nullable when an unknown layout appears.
+        public ushort? m_Tag;
+        public bool? m_IsActive;
 
         public Transform m_Transform;
         public MeshRenderer m_MeshRenderer;
@@ -35,6 +39,11 @@ namespace AnimeStudio
 
             var m_Layer = reader.ReadInt32();
             m_Name = reader.ReadAlignedString();
+            if (reader.Game.Type.IsGI() && reader.Position - reader.byteStart + 3 == byteSize)
+            {
+                m_Tag = reader.ReadUInt16();
+                m_IsActive = reader.ReadBoolean();
+            }
         }
 
         public bool HasModel() => HasMesh(m_Transform, new List<bool>());

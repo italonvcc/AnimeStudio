@@ -16,7 +16,9 @@ namespace ACLLibs
         private const string DLL_NAME = "AnimeStudio.ACL.MHY";
         static ACL()
         {
-            DllLoader.PreloadDll(DLL_NAME);
+            // The x64-only MHY decoder is packaged beside the application,
+            // like the SR/DB decoders, rather than under an x64 subfolder.
+            DllLoader.PreloadDll(DLL_NAME, archSpecific: false);
         }
         public static void DecompressClip(byte[] data, out float[] values, out float[] times)
         {
@@ -32,15 +34,84 @@ namespace ACLLibs
             Dispose(ref decompressedClip);
         }
 
+        // The older Genshin clips are ACL 1.x uniformly sampled CompressedClip
+        // buffers, not the database-backed CompressedTracks buffers. Validate the
+        // vendored MHY decoder's header before passing source bytes to native code.
+        public static void DecompressGenshinLegacyClip(byte[] data, out float[] values, out float[] times)
+        {
+            GenshinLegacyAclHeader.Validate(data, out int expectedValues, out int expectedTimes);
+            IntPtr allocation = Marshal.AllocHGlobal(checked(data.Length + 15));
+            var clip = new DecompressedClip();
+            try
+            {
+                IntPtr aligned = new((allocation.ToInt64() + 15) & ~15L);
+                Marshal.Copy(data, 0, aligned, data.Length);
+                DecompressAlignedClip(aligned, ref clip);
+                if (clip.ValuesCount != expectedValues || clip.TimesCount != expectedTimes ||
+                    clip.Values == IntPtr.Zero || clip.Times == IntPtr.Zero)
+                    throw new System.IO.InvalidDataException("Genshin legacy ACL output does not match its validated header.");
+                values = new float[expectedValues];
+                times = new float[expectedTimes];
+                Marshal.Copy(clip.Values, values, 0, expectedValues);
+                Marshal.Copy(clip.Times, times, 0, expectedTimes);
+            }
+            finally
+            {
+                Dispose(ref clip);
+                Marshal.FreeHGlobal(allocation);
+            }
+        }
+
         #region importfunctions
 
         [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern void DecompressClip(byte[] data, ref DecompressedClip decompressedClip);
 
+        [DllImport(DLL_NAME, EntryPoint = "DecompressClip", CallingConvention = CallingConvention.Cdecl)]
+        private static extern void DecompressAlignedClip(nint data, ref DecompressedClip decompressedClip);
+
         [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern void Dispose(ref DecompressedClip decompressedClip);
 
         #endregion
+    }
+
+    // Managed-only validation is separate from ACL's native DLL initializer so
+    // source header fixtures can be checked without loading a decoder.
+    public static class GenshinLegacyAclHeader
+    {
+        public static void Validate(byte[] data, out int valueCount, out int sampleCount)
+        {
+            valueCount = sampleCount = 0;
+            // Offsets follow CompressedClip (16 bytes) and ClipHeader in the
+            // vendored AnimeStudio.ACL.MHY/acl/core/compressed_clip.h.
+            if (data == null || data.Length < 48 || BitConverter.ToUInt32(data, 8) != 0xAC10AC10 ||
+                BitConverter.ToUInt16(data, 12) != 3 || data[14] != 0 || data[15] != 0)
+                throw new System.IO.InvalidDataException("Unsupported Genshin legacy ACL clip header.");
+            uint size = BitConverter.ToUInt32(data, 0);
+            ushort bones = BitConverter.ToUInt16(data, 16);
+            ushort segments = BitConverter.ToUInt16(data, 18);
+            uint samples = BitConverter.ToUInt32(data, 28);
+            uint rate = BitConverter.ToUInt32(data, 32);
+            long count = (long)bones * 10 * samples;
+            if (size < 48 || size > data.Length || bones == 0 || segments == 0 ||
+                samples == 0 || rate == 0 || samples > 1_000_000 || count > 20_000_000)
+                throw new System.IO.InvalidDataException("Invalid or unbounded Genshin legacy ACL clip dimensions.");
+            // The five PtrOffset16 fields are relative to ClipHeader at byte 16.
+            // SegmentHeader has five uint32 fields (20 bytes) in the vendored API.
+            ushort segmentOffset = BitConverter.ToUInt16(data, 36);
+            if (segmentOffset is 0 or ushort.MaxValue ||
+                16L + segmentOffset + (long)segments * 20 > size)
+                throw new System.IO.InvalidDataException("Genshin legacy ACL segment headers are out of bounds.");
+            for (int field = 38; field <= 44; field += 2)
+            {
+                ushort relative = BitConverter.ToUInt16(data, field);
+                if (relative != 0 && relative != ushort.MaxValue && 16L + relative >= size)
+                    throw new System.IO.InvalidDataException("Genshin legacy ACL data offset is out of bounds.");
+            }
+            valueCount = checked((int)count);
+            sampleCount = checked((int)samples);
+        }
     }
 
     public static class SRACL
@@ -106,7 +177,7 @@ namespace ACLLibs
             {
                 return IntPtr.Zero;
             }
-            base_ptr = Marshal.AllocHGlobal(data.Length + 8);
+            base_ptr = Marshal.AllocHGlobal(checked(data.Length + 15));
             var dataAligned = new IntPtr(16 * (((long)base_ptr + 15) / 16));
             Marshal.Copy(data, 0, dataAligned, data.Length);
             return dataAligned;
