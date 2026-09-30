@@ -24,7 +24,7 @@ record of source features that cannot yet be reconstructed.
 This document belongs in AnimeStudio `docs/Genshin` as explicitly requested.
 Exporter discovery, parsing, GUI/CLI, packaging and import lessons stay here.
 Game shaders and reusable runtime effect implementations belong in
-[`com.caladan.shaders`](https://github.com/italonvcc/com.caladan.shaders).
+[`com.caladan.stylizedgamekit`](https://github.com/italonvcc/com.caladan.StylizedGameKit).
 This plan does not resume the paused Mona study or change the Manekin workstream.
 
 ## Research baseline and existing implementation

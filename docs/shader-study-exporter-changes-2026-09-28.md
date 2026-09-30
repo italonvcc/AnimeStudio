@@ -233,7 +233,7 @@ that do not yield a Texture are filtered before this writer; the companion repor
 alone must not be presented as proof of dependency completeness.
 
 Preview PNG behavior remains available. The custom Unity importer and binder
-live in the user's `com.caladan.shaders` package, not AnimeStudio. Without that
+live in the user's `com.caladan.stylizedgamekit` package, not AnimeStudio. Without that
 package, consumers can continue using PNG previews. The production exporter
 must not depend on RenderDoc, Unity execution or the shader-study fixtures.
 

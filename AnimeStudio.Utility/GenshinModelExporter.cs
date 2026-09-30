@@ -152,7 +152,7 @@ namespace AnimeStudio
             File.WriteAllText(Path.Combine(destination,"native-texture-export.json"),JsonConvert.SerializeObject(nativeTextures,Formatting.Indented));
             File.WriteAllText(Path.Combine(destination,"NATIVE-TEXTURES.txt"),
                 "NativeTextures/*.astexture preserves original Windows 2D/cubemap GPU bytes and every authored mip. " +
-                "These optional companions require AssetStudioNativeTextureImporter from the com.caladan.shaders Unity package. " +
+                "These optional companions require AssetStudioNativeTextureImporter from the com.caladan.stylizedgamekit Unity package. " +
                 "Keep NativeTextures beside this model and its Materials JSON; the AssetStudio FBX material binder prefers them over PNG previews. " +
                 "Without that importer, continue using the PNG files. Unsupported formats/layouts are listed in native-texture-export.json. " +
                 "Native companions are not platform-transcoded; the destination GPU must support their format.\n");

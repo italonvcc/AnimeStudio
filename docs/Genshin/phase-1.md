@@ -24,4 +24,4 @@ Resolve shader names from qualified Shader references and validated metadata. Ke
 
 Show the requested mannequin submenu and checkboxes with its export action disabled. Do not implement the new mannequin export yet. Earlier assembly research remains available as historical evidence.
 
-Update 2026-09-28: the user has now provided the separate Unity project and authorized shader reconstruction there. Keep that implementation in its `com.caladan.shaders` package; extraction research and production-exporter responsibilities remain unchanged. See [shader-study extraction findings](shader-study-extraction-2026-09-28.md). Disposable import/playback verification projects remain extraction acceptance tests.
+Update 2026-09-28: the user has now provided the separate Unity project and authorized shader reconstruction there. Keep that implementation in its `com.caladan.stylizedgamekit` package; extraction research and production-exporter responsibilities remain unchanged. See [shader-study extraction findings](shader-study-extraction-2026-09-28.md). Disposable import/playback verification projects remain extraction acceptance tests.

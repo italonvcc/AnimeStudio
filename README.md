@@ -2,7 +2,7 @@
 
 Fork implementation notes: [shader-study exporter changes, 2026-09-28](docs/shader-study-exporter-changes-2026-09-28.md) document the current uncommitted FBX, shader-metadata and native-texture changes, validation and limits.
 
-Genshin asset research, analysis tools, and reproduction steps are in the [Genshin study](docs/Genshin/README.md). Production exporter changes and their Unity import lessons remain documented in AnimeStudio's main `docs/` directory. Shader implementation and rendering validation live in the separate [com.caladan.shaders package](https://github.com/italonvcc/com.caladan.shaders).
+Genshin asset research, analysis tools, and reproduction steps are in the [Genshin study](docs/Genshin/README.md). Production exporter changes and their Unity import lessons remain documented in AnimeStudio's main `docs/` directory. Shader implementation and rendering validation live in [Stylized Game Kit](https://github.com/italonvcc/com.caladan.StylizedGameKit), the `com.caladan.stylizedgamekit` Unity package.
 
 ## Asset extraction tool for unity games !
 
@@ -49,7 +49,7 @@ Use the .NET 10 SDK. Rebuilding native libraries additionally requires Visual St
 
 Run `./build.ps1` for the single current Release distribution: `dist/net10.0-windows`. Launch `AnimeStudio.GUI.exe` there; the matching `AnimeStudio.CLI.exe` uses the same `bin/` dependencies. The script publishes current working-tree source into clean staging, verifies the native FBX library hash and CLI startup, and records payload hashes in `build-manifest.json`. Build logs and previous-distribution backups live in ignored `artifacts/build-records/`. Use this folder rather than old project `bin/Debug` or `bin/Release` copies. Both launchers require the .NET 10 Windows Desktop runtime.
 
-Genshin model, character and weapon exports carry a versioned `anime-studio-import.json` beside each FBX and its source-backed recipe. Install the `com.caladan.shaders` Unity package to import these exports; AnimeStudio no longer places Unity Editor scripts inside export folders. See [the import descriptor contract](docs/Genshin/Unity-Import-Descriptor.md).
+Genshin model, character and weapon exports carry a versioned `anime-studio-import.json` beside each FBX and its source-backed recipe. Install Stylized Game Kit (`com.caladan.stylizedgamekit`) to import these exports; AnimeStudio no longer places Unity Editor scripts inside export folders. See [the import descriptor contract](docs/Genshin/Unity-Import-Descriptor.md).
 
 The native libraries are not built by that script, they sit prebuilt in `AnimeStudio.Libraries` and only need rebuilding when you touch their sources. Each one is its own project in the solution and outputs straight into that folder :
 

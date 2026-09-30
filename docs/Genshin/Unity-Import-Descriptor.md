@@ -1,11 +1,11 @@
 # Genshin Unity import descriptor
 
 AnimeStudio exports source-backed assets and metadata. The Unity Editor code that
-reads them belongs to `com.caladan.shaders` (its `Editor/` import implementation),
+reads them belongs to `com.caladan.stylizedgamekit` (its `Editor/` import implementation),
 not to each export. New exports contain no generated `.cs` files or `Generic/Editor`
 folder. Legacy importer templates remain in the source tree for comparison, but
 are no longer embedded in the utility assembly or written to output.
-The package's [AnimeStudio import guide](https://github.com/italonvcc/com.caladan.shaders/blob/main/Docs/AnimeStudio-Import.md)
+The package's [AnimeStudio import guide](https://github.com/italonvcc/com.caladan.StylizedGameKit/blob/main/Docs/AnimeStudio-Import.md)
 owns current Unity setup and live validation; this page owns the exporter file
 contract and offline evidence.
 
