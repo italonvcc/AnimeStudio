@@ -17,6 +17,9 @@ namespace AnimeStudio
     public class ImportedFrame
     {
         public string Name { get; set; }
+        // Source identity is retained for guarded rig edits. Synthetic frames
+        // intentionally have no source GameObject and cannot be overridden.
+        public GameObject SourceGameObject { get; set; }
         public Quaternion LocalRotation { get; set; }
         public Vector3 LocalPosition { get; set; }
         public Vector3 LocalScale { get; set; }
@@ -154,6 +157,8 @@ namespace AnimeStudio
     public class ImportedMesh
     {
         public string Path { get; set; }
+        [Newtonsoft.Json.JsonIgnore]
+        public Mesh SourceMesh { get; set; }
         public List<ImportedVertex> VertexList { get; set; }
         public List<ImportedSubmesh> SubmeshList { get; set; }
         public List<ImportedBone> BoneList { get; set; }
@@ -169,6 +174,8 @@ namespace AnimeStudio
         public List<ImportedFace> FaceList { get; set; }
         public string Material { get; set; }
         public int BaseVertex { get; set; }
+        [Newtonsoft.Json.JsonIgnore]
+        public Material SourceMaterial { get; set; }
     }
 
     public class ImportedVertex
@@ -196,6 +203,8 @@ namespace AnimeStudio
     public class ImportedMaterial
     {
         public string Name { get; set; }
+        [Newtonsoft.Json.JsonIgnore]
+        public Material SourceMaterial { get; set; }
         public Color Diffuse { get; set; }
         public Color Ambient { get; set; }
         public Color Specular { get; set; }
@@ -218,6 +227,7 @@ namespace AnimeStudio
     {
         public string Name { get; set; }
         public byte[] Data { get; set; }
+        public Texture2D SourceTexture { get; set; }
 
         public ImportedTexture(MemoryStream stream, string name)
         {

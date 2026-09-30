@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -57,11 +57,14 @@ namespace AnimeStudio.FbxInterop
         {
             IsDisposed = true;
 
-            _frameToNode.Clear();
-            _createdMaterials.Clear();
-            _createdTextures.Clear();
+            // A failed native-library load can leave this finalizable object
+            // only partly constructed. Cleanup must preserve the original error
+            // instead of crashing the process from the finalizer thread.
+            _frameToNode?.Clear();
+            _createdMaterials?.Clear();
+            _createdTextures?.Clear();
 
-            AsFbxDisposeContext(ref _pContext);
+            if (_pContext != IntPtr.Zero) AsFbxDisposeContext(ref _pContext);
         }
 
         private void EnsureNotDisposed()
@@ -314,7 +317,6 @@ namespace AnimeStudio.FbxInterop
                     var type = importedMesh.uvType[i];
                     AsFbxMeshCreateUV(mesh, i, type);
                 }
-
 
                 foreach (var meshObj in importedMesh.SubmeshList)
                 {

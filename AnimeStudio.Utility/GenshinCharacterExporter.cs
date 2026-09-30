@@ -20,10 +20,17 @@ namespace AnimeStudio
         public static List<AssetEntry> SelectClips(IEnumerable<AssetEntry> map, string character)
         {
             string prefix = "Ani_" + character + "_";
-            var own = map.Where(e => e.Type == ClassIDType.AnimationClip && e.Name.StartsWith(prefix, StringComparison.Ordinal)).ToList();
-            string shared = "Ani_Avatar_" + character.Split('_')[1] + "_";
+            var entries = map as IList<AssetEntry> ?? map.ToList();
+            var own = entries.Where(e => e.Type == ClassIDType.AnimationClip && e.Name.StartsWith(prefix, StringComparison.Ordinal)).ToList();
+            var tokens = character.Split('_');
+            if (tokens.Length < 4) throw new ArgumentException("Select a character Animator named Avatar_<body>_<weapon>_<character>.");
+            string weaponClass = "Ani_Avatar_" + tokens[1] + "_" + tokens[2] + "_";
+            string shared = "Ani_Avatar_" + tokens[1] + "_";
             var suffixes = own.Select(e => e.Name[prefix.Length..]).ToHashSet(StringComparer.Ordinal);
-            return own.Concat(map.Where(e => e.Type == ClassIDType.AnimationClip && e.Name.StartsWith(shared, StringComparison.Ordinal) && suffixes.Contains(e.Name[shared.Length..])))
+            return own.Concat(entries.Where(e => e.Type == ClassIDType.AnimationClip &&
+                    e.Name.StartsWith(weaponClass, StringComparison.Ordinal) && suffixes.Contains(e.Name[weaponClass.Length..])))
+                .Concat(entries.Where(e => e.Type == ClassIDType.AnimationClip &&
+                    e.Name.StartsWith(shared, StringComparison.Ordinal) && suffixes.Contains(e.Name[shared.Length..])))
                 .DistinctBy(e => (e.Source, e.Offset, e.PathID, e.Type)).ToList();
         }
         public static string Export(GenshinCharacterReferences references, AssetEntry selected, string destination, GenshinCharacterOptions options, Action<string> progress = null)
@@ -98,7 +105,7 @@ namespace AnimeStudio
                 progress?.Invoke("Organizing shared body animations; retaining character materials and textures");
                 GenshinSharedAssets.Package(destination, selected.Name);
                 File.WriteAllText(Path.Combine(destination, "character-export.json"), JsonConvert.SerializeObject(new { schemaVersion = 2, references.GameVersion, references.Fingerprint,
-                    character = selected, options, animationSelection = "Character name prefix plus matching shared body action suffixes. Layer pairs are validated on Unity import.",
+                    character = selected, options, animationSelection = "Character clips plus matching weapon-class and shared body action suffixes. Layer pairs are validated on Unity import.",
                     components, status = "Exported; copy this character folder AND its sibling Generic folder under the same Unity Assets parent." }, Formatting.Indented));
                 return destination;
             }

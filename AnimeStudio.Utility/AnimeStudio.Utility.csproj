@@ -11,8 +11,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="GenshinUnityImport.cs.txt" LogicalName="AnimeStudio.GenshinUnityImport.cs" WithCulture="false" />
-    <EmbeddedResource Include="GenshinClipCompositionImport.cs.txt" LogicalName="AnimeStudio.GenshinClipCompositionImport.cs" WithCulture="false" />
+    <EmbeddedResource Include="GenshinParticleSystem2017Schema.json" LogicalName="AnimeStudio.GenshinParticleSystem2017Schema.json" WithCulture="false" />
     <PackageReference Include="Kyaru.Texture2DDecoder.Windows" Version="0.2.0" />
     <PackageReference Include="Mono.Cecil" Version="0.11.6" />
     <PackageReference Include="SkiaSharp" Version="3.119.4" />

@@ -32,7 +32,8 @@ namespace AnimeStudio
         public int m_Aniso;
         public float m_MipBias;
         public int m_WrapMode;
-        public int m_WrapV, m_WrapW;
+        public int m_WrapV;
+        public int m_WrapW;
 
         public GLTextureSettings(ObjectReader reader)
         {
@@ -54,7 +55,8 @@ namespace AnimeStudio
             else
             {
                 m_WrapMode = reader.ReadInt32();
-                m_WrapV = m_WrapW = m_WrapMode;
+                m_WrapV = m_WrapMode;
+                m_WrapW = m_WrapMode;
             }
             if (reader.Game.Type.IsArknightsEndfieldCB3() || reader.Game.Type.IsArknightsEndfield())
             {

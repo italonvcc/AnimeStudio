@@ -1,0 +1,444 @@
+using System;
+using System.IO;
+using System.Linq;
+using System.Collections.Generic;
+using System.Security.Cryptography;
+using UnityEngine;
+using UnityEditor;
+using UnityEditor.Animations;
+
+// Generated offline by AnimeStudio. A stable per-run namespace lets distinct
+// export runs coexist. This creates a preview prefab from the exported model;
+// it does not establish game animation or effect playback.
+namespace __ANIMESTUDIO_WEAPON_NAMESPACE__
+{
+[InitializeOnLoad]
+public sealed class AnimeStudioWeaponImport : AssetPostprocessor
+{
+    [Serializable] private sealed class TargetInfo { public string path, componentKind; }
+    [Serializable] private sealed class ClipInfo
+    {
+        public string name, file, targetStatus;
+        public bool legacy;
+        public int animatorCustomBindings, rootMotionChannels, bodyChannels, unknownChannels;
+        public string[] targetPaths;
+        public TargetInfo[] targets;
+    }
+    [Serializable] private sealed class TexturePath { public string property, file; }
+    [Serializable] private sealed class MaterialInfo { public string name, status, reason, sourceJson; public TexturePath[] texturePaths; }
+    [Serializable] private sealed class SourceInfo { public string Name, Type, SerializedFile, PathID, Source; public long Offset; }
+    [Serializable] private sealed class CubemapFaceInfo { public int face; public string file; }
+    [Serializable] private sealed class CubemapBindingInfo
+    {
+        public string rendererPath, sourceRendererPath, materialName, property, materialJsonPath;
+        public string metadata, rawHeader, imageData, payloadStatus, status, reason;
+        public int submeshIndex;
+        public SourceInfo sourceMaterial, sourceCubemap;
+        public CubemapFaceInfo[] faces;
+        public string[] previewErrors;
+    }
+    [Serializable] private sealed class BindPoseConflictInfo { public string FramePath; }
+    [Serializable] private sealed class RigClosureInfo
+    {
+        public string SelectedRootPath, note;
+        public int includedTransformCount;
+        public SourceInfo exportRoot, selectedRoot;
+    }
+    [Serializable] private sealed class Recipe
+    {
+        public int schemaVersion;
+        public string familyKey, familyName, weaponClass, model, prefab, rigMode, rigClosureStatus, selectedRootPath, bindPoseStatus, sourceReport, effectPlayback, validation;
+        public bool materialsRequested, animationBindingUnknown;
+        public ClipInfo[] clips;
+        public MaterialInfo[] materials;
+        public CubemapBindingInfo[] cubemapBindings;
+        public BindPoseConflictInfo[] bindPoseConflicts;
+        public RigClosureInfo rigClosure;
+    }
+    [Serializable] private sealed class Report
+    {
+        public string status, prefab, rigMode, rigClosureStatus, selectedRootPath, bindPoseStatus, error;
+        public int clips, renderers, savedMaterials;
+        public bool prefabPreserved, previewControllerPreserved;
+        public string[] missingBindings, missingAppearance, objectReferenceWarnings, unsupported, previewTargets, bindPoseConflictFrames;
+        public string[] notes;
+    }
+
+    private static bool scheduled, running;
+    static AnimeStudioWeaponImport()
+    {
+        EditorApplication.playModeStateChanged += state => { if (state == PlayModeStateChange.EnteredEditMode) Schedule(); };
+        Schedule();
+    }
+
+    static void OnPostprocessAllAssets(string[] imported, string[] deleted, string[] moved, string[] oldPaths)
+    {
+        if (imported.Concat(deleted).Concat(moved).Any(path => path.EndsWith("weapon-import.json", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".fbx", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".anim", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".astexture", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".png", StringComparison.OrdinalIgnoreCase))) Schedule();
+    }
+
+    private static void Schedule()
+    {
+        if (scheduled || running) return;
+        scheduled = true;
+        EditorApplication.delayCall += Run;
+    }
+
+    private static void Run()
+    {
+        scheduled = false;
+        if (running || EditorApplication.isPlayingOrWillChangePlaymode) return;
+        if (EditorApplication.isCompiling || EditorApplication.isUpdating) { Schedule(); return; }
+        running = true;
+        try
+        {
+            foreach (string guid in AssetDatabase.FindAssets("AnimeStudioWeaponImport t:MonoScript"))
+            {
+                string script = AssetDatabase.GUIDToAssetPath(guid);
+                if (Path.GetFileName(script) != "AnimeStudioWeaponImport.cs") continue;
+                var monoScript = AssetDatabase.LoadAssetAtPath<MonoScript>(script);
+                if (monoScript == null || monoScript.GetClass() != typeof(AnimeStudioWeaponImport)) continue;
+                string editorFolder = Path.GetDirectoryName(script).Replace('\\', '/');
+                string genericFolder = Path.GetDirectoryName(editorFolder).Replace('\\', '/');
+                string runFolder = Path.GetDirectoryName(genericFolder).Replace('\\', '/');
+                if (!runFolder.StartsWith("Assets/", StringComparison.Ordinal)) continue;
+                foreach (string path in Directory.GetFiles(runFolder, "weapon-import.json", SearchOption.AllDirectories))
+                    Import(path.Replace('\\', '/'), script);
+            }
+        }
+        finally { running = false; }
+    }
+
+    private static string Resolve(string folder, string relative)
+    {
+        if (string.IsNullOrWhiteSpace(relative)) throw new Exception("Empty weapon import path.");
+        string full = Path.GetFullPath(Path.Combine(folder, relative));
+        string assets = Path.GetFullPath("Assets") + Path.DirectorySeparatorChar;
+        if (!full.StartsWith(assets, StringComparison.OrdinalIgnoreCase))
+            throw new Exception("Weapon import path escapes Assets: " + relative);
+        string variant = Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!full.StartsWith(variant, StringComparison.OrdinalIgnoreCase))
+            throw new Exception("Weapon import path escapes its variant folder: " + relative);
+        return "Assets/" + full.Substring(assets.Length).Replace('\\', '/');
+    }
+
+    private static void Import(string path, string script)
+    {
+        string folder = Path.GetDirectoryName(path).Replace('\\', '/');
+        string reportPath = folder + "/unity-import-report.json";
+        GameObject instance = null;
+        try
+        {
+            var recipe = JsonUtility.FromJson<Recipe>(File.ReadAllText(path));
+            if (recipe == null || recipe.schemaVersion != 1) throw new Exception("Unsupported weapon import recipe.");
+            string modelPath = Resolve(folder, recipe.model);
+            string prefabPath = Resolve(folder, recipe.prefab);
+            if (!File.Exists(modelPath)) throw new Exception("Missing weapon model: " + modelPath);
+            var unsupported = new List<string>();
+            var missingAppearance = new List<string>();
+            if (recipe.rigMode == "Unsupported") unsupported.Add("Mixed, ambiguous, or body/muscle source clips require a verified rig contract.");
+            if (recipe.bindPoseStatus == "PerMeshSourceBindPosesUnityImportUnvalidated")
+                unsupported.Add("Conflicting mesh bind poses use source hierarchy and per-mesh FBX cluster binds; live Unity skin, rig and bind-pose validation is required.");
+            if (recipe.rigClosureStatus == "SourceProvenDetachedRigUnityImportUnvalidated")
+            {
+                unsupported.Add("A detached rig is included under its source-proven ancestor; live Unity skin and animation binding validation is required.");
+                if (string.IsNullOrWhiteSpace(recipe.selectedRootPath) || recipe.rigClosure == null ||
+                    recipe.rigClosure.SelectedRootPath != recipe.selectedRootPath)
+                    unsupported.Add("Detached rig closure has no consistent selected weapon path relative to the FBX root.");
+            }
+            if (recipe.animationBindingUnknown) unsupported.Add("The exporter reported unresolved native animation binding markers.");
+            if (recipe.clips != null && recipe.clips.Any(c => c.bodyChannels > 0))
+                unsupported.Add("Body or muscle Animator channels are present; a weapon Humanoid Avatar is not generated.");
+            if (recipe.clips != null && recipe.clips.Any(c => c.unknownChannels > 0))
+                unsupported.Add("Some Animator channels could not be classified from the exported clip bindings.");
+            foreach (var material in recipe.materials ?? new MaterialInfo[0])
+            {
+                if (material.status != "resolved") missingAppearance.Add(material.name + ": " + material.reason);
+                if (!string.IsNullOrEmpty(material.sourceJson) && !File.Exists(Resolve(folder, material.sourceJson)))
+                    missingAppearance.Add(material.name + ": missing source material JSON " + material.sourceJson);
+                foreach (var texture in material.texturePaths ?? new TexturePath[0])
+                {
+                    string asset = Resolve(folder, texture.file);
+                    if (!File.Exists(asset) || AssetDatabase.LoadAssetAtPath<Texture2D>(asset) == null)
+                        missingAppearance.Add(material.name + "/" + texture.property + ": " + texture.file);
+                }
+            }
+            foreach (var cubemap in recipe.cubemapBindings ?? new CubemapBindingInfo[0])
+            {
+                string slot = cubemap.materialName + "/" + cubemap.property + " [submesh " + cubemap.submeshIndex +
+                    ", Cubemap " + (cubemap.sourceCubemap?.PathID ?? "unknown source") + "]";
+                unsupported.Add(slot + ": Unity Cubemap property binding is unsupported; face previews are evidence only.");
+                if (cubemap.payloadStatus != "RawAndSixPreviews")
+                    missingAppearance.Add(slot + ": source Cubemap payload " + (cubemap.payloadStatus ?? "unknown") + "; " + cubemap.reason);
+                foreach (string previewError in cubemap.previewErrors ?? Array.Empty<string>())
+                    missingAppearance.Add(slot + ": preview error " + previewError);
+                void CheckFile(string relative, string kind, bool required)
+                {
+                    if (string.IsNullOrWhiteSpace(relative))
+                    {
+                        if (required) missingAppearance.Add(slot + ": no " + kind + " path");
+                    }
+                    else if (!File.Exists(Resolve(folder, relative)))
+                        missingAppearance.Add(slot + ": missing " + kind + " " + relative);
+                }
+                CheckFile(cubemap.materialJsonPath, "material JSON", true);
+                CheckFile(cubemap.metadata, "Cubemap metadata", true);
+                CheckFile(cubemap.rawHeader, "Cubemap raw header", true);
+                CheckFile(cubemap.imageData, "Cubemap image data", false);
+                foreach (var face in cubemap.faces ?? Array.Empty<CubemapFaceInfo>())
+                    CheckFile(face?.file, "face " + face?.face, true);
+            }
+            string stampFile = "Library/AnimeStudio/Weapons/" + AssetDatabase.AssetPathToGUID(path) + ".txt";
+            string stamp = File.ReadAllText(path) + File.ReadAllText(script) + AssetDatabase.GetAssetDependencyHash(modelPath);
+            foreach (var clip in recipe.clips ?? new ClipInfo[0])
+            {
+                string clipPath = Resolve(folder, clip.file);
+                if (!File.Exists(clipPath)) throw new Exception("Missing native weapon clip: " + clip.file);
+                stamp += "|" + AssetDatabase.GetAssetDependencyHash(clipPath);
+            }
+            string signature;
+            using (var sha = SHA256.Create()) signature = BitConverter.ToString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(stamp)));
+            if (File.Exists(stampFile) && File.ReadAllText(stampFile) == signature &&
+                File.Exists(prefabPath) && File.Exists(reportPath)) return;
+
+            ConfigureModel(modelPath, recipe.rigMode);
+            int materials = recipe.materialsRequested ? ExtractMaterials(modelPath, folder) : 0;
+            var model = AssetDatabase.LoadAssetAtPath<GameObject>(modelPath);
+            if (model == null) throw new Exception("Weapon FBX has not imported: " + modelPath);
+            bool prefabPreserved = File.Exists(prefabPath);
+            var prefabSource = prefabPreserved ? AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath) : model;
+            if (prefabSource == null) throw new Exception("Existing weapon prefab could not be loaded: " + prefabPath);
+            instance = PrefabUtility.InstantiatePrefab(prefabSource) as GameObject;
+            if (instance == null) throw new Exception("Weapon prefab instance could not be created.");
+            instance.name = string.IsNullOrEmpty(recipe.familyName) ? "Weapon" : recipe.familyName;
+            var missingBindings = new HashSet<string>(StringComparer.Ordinal);
+            var objectReferenceWarnings = new HashSet<string>(StringComparer.Ordinal);
+            if (recipe.rigClosureStatus == "SourceProvenDetachedRigUnityImportUnvalidated" &&
+                ResolveTarget(instance.transform, recipe.selectedRootPath) == null)
+                missingBindings.Add("Source-proven selected weapon path is absent from imported FBX: " + recipe.selectedRootPath);
+            var previewGroups = new Dictionary<string, List<AnimationClip>>(StringComparer.Ordinal);
+            var previewNodes = new Dictionary<string, Transform>(StringComparer.Ordinal);
+            var importedClips = 0;
+            foreach (var info in recipe.clips ?? new ClipInfo[0])
+            {
+                string clipPath = Resolve(folder, info.file);
+                var clip = AssetDatabase.LoadAssetAtPath<AnimationClip>(clipPath);
+                if (clip == null) throw new Exception("Native weapon clip has not imported: " + info.file);
+                importedClips++;
+                bool usable = true;
+                if (clip.legacy != info.legacy) { unsupported.Add("Legacy flag differs after import: " + info.name); usable = false; }
+                if (info.targetStatus != "ProvenSourceLink" || info.targets == null || info.targets.Length == 0)
+                {
+                    unsupported.Add(info.name + ": source clip owner is " + (info.targetStatus ?? "unproven"));
+                    continue; // Never guess that an unowned clip binds at the FBX root.
+                }
+                var provenPaths = new HashSet<string>(info.targetPaths ?? Array.Empty<string>(), StringComparer.Ordinal);
+                if (provenPaths.Count != info.targets.Length || info.targets.Any(t => t == null || !provenPaths.Contains(t.path)))
+                {
+                    unsupported.Add(info.name + ": target records differ from source-proven target paths.");
+                    continue;
+                }
+                foreach (var owner in info.targets)
+                {
+                    string expectedKind = info.legacy ? "Animation" : "Animator";
+                    if (owner.componentKind != expectedKind)
+                    {
+                        unsupported.Add(info.name + ": unsupported source component at " + owner.path);
+                        continue;
+                    }
+                    var node = ResolveTarget(instance.transform, owner.path);
+                    if (node == null)
+                    {
+                        missingBindings.Add(info.name + ": missing source-proven owner " + owner.path);
+                        continue;
+                    }
+                    bool ownerUsable = usable;
+                    foreach (var binding in AnimationUtility.GetCurveBindings(clip).Concat(AnimationUtility.GetObjectReferenceCurveBindings(clip)))
+                    {
+                        var target = ResolveTarget(node, binding.path);
+                        string label = info.name + " @ " + owner.path + ": " + binding.path;
+                        if (target == null) { missingBindings.Add(label); ownerUsable = false; }
+                        else if (binding.type == typeof(Material) && target.GetComponent<Renderer>() == null)
+                        { missingBindings.Add(label + " [Material without Renderer]"); ownerUsable = false; }
+                        else if (binding.type == typeof(Animator) && binding.path == "" && owner.componentKind == "Animator")
+                        { /* The proven owner receives its Animator below; validate against that intended component. */ }
+                        else if (binding.type != typeof(GameObject) && binding.type != typeof(Material)
+                            && typeof(Component).IsAssignableFrom(binding.type) && target.GetComponent(binding.type) == null)
+                        { missingBindings.Add(label + " [" + binding.type.Name + "]"); ownerUsable = false; }
+                    }
+                    foreach (var binding in AnimationUtility.GetObjectReferenceCurveBindings(clip))
+                        foreach (var key in AnimationUtility.GetObjectReferenceCurve(clip, binding) ?? Array.Empty<ObjectReferenceKeyframe>())
+                            if (key.value == null) objectReferenceWarnings.Add(info.name + " @ " + owner.path + ": " + binding.path + "/" + binding.propertyName + " has a null object key (intentional clear or unresolved source reference)");
+                    if (!ownerUsable) continue;
+                    string groupKey = owner.componentKind + ":" + owner.path;
+                    if (!previewGroups.TryGetValue(groupKey, out var group)) previewGroups[groupKey] = group = new List<AnimationClip>();
+                    group.Add(clip);
+                    previewNodes[groupKey] = node;
+                }
+            }
+
+            bool previewControllerPreserved = false;
+            var previewTargets = new List<string>();
+            if (!prefabPreserved && recipe.rigMode != "Unsupported")
+            {
+                foreach (var pair in previewGroups.OrderBy(p => p.Key, StringComparer.Ordinal))
+                {
+                    var node = previewNodes[pair.Key];
+                    if (pair.Key.StartsWith("Animator:", StringComparison.Ordinal) && recipe.rigMode == "Generic")
+                    {
+                        var animator = node.GetComponent<Animator>() ?? node.gameObject.AddComponent<Animator>();
+                        if (animator.runtimeAnimatorController != null)
+                        { unsupported.Add(pair.Key + ": existing source Animator controller preserved; review manually."); continue; }
+                        animator.runtimeAnimatorController = BuildPreviewController(folder, pair.Key, pair.Value, out bool preserved);
+                        previewControllerPreserved |= preserved;
+                        animator.applyRootMotion = false;
+                        previewTargets.Add(pair.Key);
+                    }
+                    else if (pair.Key.StartsWith("Animation:", StringComparison.Ordinal) && recipe.rigMode == "Legacy")
+                    {
+                        var animation = node.GetComponent<Animation>() ?? node.gameObject.AddComponent<Animation>();
+                        if (animation.clip != null)
+                        { unsupported.Add(pair.Key + ": existing source legacy Animation clips preserved; review manually."); continue; }
+                        foreach (var sourceClip in pair.Value) animation.AddClip(sourceClip, sourceClip.name);
+                        animation.clip = pair.Value[0];
+                        animation.playAutomatically = false;
+                        previewTargets.Add(pair.Key);
+                    }
+                }
+            }
+            // No unproven effect activation or character-hand attachment is added.
+            if (!prefabPreserved) PrefabUtility.SaveAsPrefabAsset(instance, prefabPath);
+            AssetDatabase.SaveAssets();
+            string status = prefabPreserved ? "PreservedExistingPrefabNeedsReview" :
+                missingBindings.Count == 0 && missingAppearance.Count == 0 && objectReferenceWarnings.Count == 0 && unsupported.Count == 0 && !previewControllerPreserved
+                    ? "ImportedUnvalidated" : "Partial";
+            File.WriteAllText(reportPath, JsonUtility.ToJson(new Report
+            {
+                status = status, prefab = prefabPath, rigMode = recipe.rigMode,
+                rigClosureStatus = recipe.rigClosureStatus ?? "Unknown", selectedRootPath = recipe.selectedRootPath,
+                bindPoseStatus = recipe.bindPoseStatus ?? "Unknown",
+                bindPoseConflictFrames = (recipe.bindPoseConflicts ?? Array.Empty<BindPoseConflictInfo>())
+                    .Select(conflict => conflict?.FramePath ?? "unknown frame").ToArray(),
+                clips = importedClips, renderers = instance.GetComponentsInChildren<Renderer>(true).Length,
+                savedMaterials = materials, missingBindings = missingBindings.OrderBy(x => x).ToArray(),
+                prefabPreserved = prefabPreserved, previewControllerPreserved = previewControllerPreserved,
+                previewTargets = previewTargets.ToArray(),
+                missingAppearance = missingAppearance.ToArray(), objectReferenceWarnings = objectReferenceWarnings.ToArray(), unsupported = unsupported.ToArray(),
+                notes = new[] { "Clip timing and playback, including RootT/RootQ motion, material shader binding, attachments and effects require live validation.",
+                    "Existing prefab, preview controller and material assets are preserved with their GUIDs and user edits. A changed recipe does not rewrite those existing assets; review their links manually." }
+            }, true));
+            Directory.CreateDirectory(Path.GetDirectoryName(stampFile));
+            File.WriteAllText(stampFile, signature);
+        }
+        catch (Exception ex)
+        {
+            File.WriteAllText(reportPath, JsonUtility.ToJson(new Report { status = "Failed", error = ex.ToString() }, true));
+            Debug.LogException(ex);
+        }
+        finally { if (instance != null) UnityEngine.Object.DestroyImmediate(instance); }
+    }
+
+    private static void ConfigureModel(string modelPath, string rigMode)
+    {
+        var importer = AssetImporter.GetAtPath(modelPath) as ModelImporter
+            ?? throw new Exception("ModelImporter missing: " + modelPath);
+        var target = rigMode == "Legacy" ? ModelImporterAnimationType.Legacy :
+            rigMode == "Generic" ? ModelImporterAnimationType.Generic : ModelImporterAnimationType.None;
+        if (importer.animationType != target || importer.importAnimation)
+        {
+            importer.animationType = target;
+            importer.importAnimation = false; // Clips are separate native .anim files.
+            importer.SaveAndReimport();
+        }
+    }
+
+    private static Transform ResolveTarget(Transform root, string relative)
+    {
+        // An empty path is the source-proven owner itself. Do not let a recipe
+        // select another hierarchy or reinterpret a native binding path. A
+        // duplicate sibling name is ambiguous, so never accept Find's first hit.
+        if (relative == null || relative.StartsWith("/", StringComparison.Ordinal) || relative.Contains('\\') ||
+            relative.Split('/').Any(part => part == "" || part == "." || part == ".."))
+            return relative == "" ? root : null;
+        var current = root;
+        foreach (string segment in relative.Split('/'))
+        {
+            Transform found = null;
+            for (int i = 0; i < current.childCount; i++)
+            {
+                var child = current.GetChild(i);
+                if (child.name != segment) continue;
+                if (found != null) return null;
+                found = child;
+            }
+            if (found == null) return null;
+            current = found;
+        }
+        return current;
+    }
+
+    private static AnimatorController BuildPreviewController(string folder, string groupKey, List<AnimationClip> clips, out bool preserved)
+    {
+        string rig = folder + "/Rig";
+        if (!AssetDatabase.IsValidFolder(rig)) AssetDatabase.CreateFolder(folder, "Rig");
+        string suffix;
+        using (var sha = SHA256.Create())
+            suffix = BitConverter.ToString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(groupKey))).Replace("-", "").Substring(0, 12);
+        string path = rig + "/WeaponPreview-" + suffix + ".controller";
+        var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(path);
+        preserved = controller != null;
+        if (preserved) return controller;
+        controller = AnimatorController.CreateAnimatorControllerAtPath(path);
+        controller.AddLayer("Preview");
+        var machine = controller.layers[0].stateMachine;
+        foreach (var clip in clips)
+        {
+            var state = machine.AddState(clip.name);
+            state.motion = clip;
+            state.writeDefaultValues = true;
+        }
+        // No default gameplay state or transition is inferred from controller bytes.
+        return controller;
+    }
+
+    private static int ExtractMaterials(string modelPath, string folder)
+    {
+        var importer = AssetImporter.GetAtPath(modelPath) as ModelImporter
+            ?? throw new Exception("ModelImporter missing: " + modelPath);
+        var remaps = importer.GetExternalObjectMap();
+        var sources = AssetDatabase.LoadAllAssetsAtPath(modelPath).OfType<Material>()
+            .GroupBy(material => material.name).ToDictionary(group => group.Key, group => group.First());
+        foreach (var pair in remaps)
+            if (pair.Key.type == typeof(Material) && pair.Value is Material material) sources[pair.Key.name] = material;
+        if (sources.Count == 0) return 0;
+        string targetFolder = folder + "/Materials";
+        if (!AssetDatabase.IsValidFolder(targetFolder)) AssetDatabase.CreateFolder(folder, "Materials");
+        bool changed = false;
+        foreach (var pair in sources.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+        {
+            var id = new AssetImporter.SourceAssetIdentifier(typeof(Material), pair.Key);
+            // An existing external remap may be the user's chosen game shader
+            // material. Keep it instead of forcing our preview .mat back in.
+            if (remaps.TryGetValue(id, out var current) && current is Material) continue;
+            string safe = new string(pair.Key.Select(c => char.IsLetterOrDigit(c) && c < 128 || c == '-' || c == '_' ? c : '_').Take(48).ToArray());
+            using var sha = SHA256.Create();
+            string hash = BitConverter.ToString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(pair.Key))).Replace("-", "").Substring(0, 8);
+            string path = targetFolder + "/" + safe + "-" + hash + ".mat";
+            var saved = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (saved == null)
+            {
+                saved = new Material(pair.Value) { name = pair.Key };
+                AssetDatabase.CreateAsset(saved, path);
+            }
+            // Existing .mat files retain their GUID, shader and user edits.
+            importer.AddRemap(id, saved);
+            changed = true;
+        }
+        if (changed) { AssetDatabase.SaveAssets(); importer.SaveAndReimport(); }
+        return sources.Count;
+    }
+}
+}

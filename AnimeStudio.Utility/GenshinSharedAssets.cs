@@ -72,6 +72,18 @@ namespace AnimeStudio
             var manifest = JObject.Parse(File.ReadAllText(manifestPath));
             foreach (var clip in manifest["sourceClips"] ?? new JArray())
                 if (links.TryGetValue((string)clip["file"], out string shared)) clip["file"] = shared;
+            // Character packaging moves preview PNGs below Textures after the
+            // model manifest is written. Keep its material slot evidence pointed
+            // at the shipped file; native .astexture paths remain at the root.
+            foreach (var binding in (manifest["materialBindings"] as JArray) ?? new JArray())
+            foreach (var texture in (binding["textures"] as JObject)?.Properties() ?? Enumerable.Empty<JProperty>())
+            {
+                string relative = (string)texture.Value;
+                if (string.IsNullOrWhiteSpace(relative) || File.Exists(Path.Combine(directory, relative))) continue;
+                if (Path.GetFileName(relative) != relative || !File.Exists(Path.Combine(directory, "Textures", relative)))
+                    throw new InvalidDataException("Exported material preview texture is missing: " + relative);
+                texture.Value = "Textures/" + relative;
+            }
             manifest["sharedAssets"] = JArray.FromObject(records);
             File.WriteAllText(manifestPath, manifest.ToString(Formatting.Indented));
 

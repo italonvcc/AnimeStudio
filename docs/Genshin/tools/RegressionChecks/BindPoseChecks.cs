@@ -41,7 +41,7 @@ internal static class BindPoseChecks
             "unweighted helper bones use Avatar default pose with FBX handedness");
         model.MeshList.Add(new ImportedMesh {Path=mesh.Path,BoneList=new() {new ImportedBone {Path=hip.Path,Matrix=Bind(8,0)}}});
         bool rejected=false;
-        try {GenshinBindPose.Restore(model);} catch(InvalidDataException) {rejected=true;}
+        try {GenshinBindPose.Restore(model);} catch(GenshinBindPoseConflictException conflict) {rejected=conflict.FramePath==hip.Path && conflict.First.RendererPath==mesh.Path && conflict.Second.RendererPath==mesh.Path;}
         check(rejected,"conflicting skin constraints are reported rather than arbitrarily choosing a mesh");
     }
 }

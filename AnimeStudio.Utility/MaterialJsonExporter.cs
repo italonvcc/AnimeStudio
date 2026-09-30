@@ -1,5 +1,6 @@
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using System;
 
 namespace AnimeStudio
 {
@@ -8,6 +9,18 @@ namespace AnimeStudio
         public static string Serialize(Material material, JsonSerializerSettings settings)
         {
             var json = JObject.FromObject(material, JsonSerializer.Create(settings));
+            // Export the source variant selection independently from material
+            // floats. An empty serialized string is a known keyword-off state.
+            string[] keywords = material.m_ShaderKeywords != null
+                ? material.m_ShaderKeywords.Split((char[])null, StringSplitOptions.RemoveEmptyEntries)
+                : material.m_LegacyShaderKeywords ?? material.m_ValidKeywords;
+            json["ShaderKeywordState"] = JObject.FromObject(new
+            {
+                Status = keywords == null ? "Unavailable" : "Serialized",
+                Raw = material.m_ShaderKeywords,
+                Enabled = keywords,
+                Invalid = material.m_InvalidKeywords
+            });
             var pointer = material.m_Shader;
             var resolved = pointer != null && pointer.TryGet(out _);
             Shader shader = null;

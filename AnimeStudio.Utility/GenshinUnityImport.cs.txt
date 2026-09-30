@@ -172,18 +172,31 @@ public class AnimeStudioCharacterImport : AssetPostprocessor
                 if (clip == null) throw new Exception("Animation has not imported: " + info.file);
                 if (Mathf.Abs(clip.length - info.duration) > .002f) throw new Exception("Unexpected clip duration: " + info.name);
                 var state = machine.AddState(info.name); state.writeDefaultValues = true;
-                // Pair secondary-only tracks with the same named shared body action when duration/rate agree.
+                // Prefer the weapon-class body action for this character. A general
+                // body action is a fallback when the class clip is absent or mismatched.
                 if (!info.body)
                 {
                     string[] tokens = recipe.character.Split('_');
                     string shared = tokens.Length >= 4 ? "Ani_Avatar_" + tokens[1] + "_" : "";
+                    string weaponClass = tokens.Length >= 4 ? shared + tokens[2] + "_" : "";
                     string prefix = "Ani_" + recipe.character + "_";
-                    var bodies = info.name.StartsWith(prefix) ? recipe.clips.Where(c => c.body && c.name == shared + info.name.Substring(prefix.Length) && Mathf.Abs(c.duration-info.duration)<.0001f && Mathf.Abs(c.rate-info.rate)<.0001f).ToArray() : new Clip[0];
-                    if (bodies.Length == 1)
+                    Clip body = null;
+                    if (info.name.StartsWith(prefix, StringComparison.Ordinal))
+                    {
+                        string suffix = info.name.Substring(prefix.Length);
+                        foreach (string bodyName in new[] { weaponClass + suffix, shared + suffix })
+                        {
+                            var matches = recipe.clips.Where(c => c.body && c.name == bodyName &&
+                                Mathf.Abs(c.duration-info.duration)<.0001f && Mathf.Abs(c.rate-info.rate)<.0001f).ToArray();
+                            if (matches.Length > 1) throw new Exception("Ambiguous body clip: " + bodyName);
+                            if (matches.Length == 1) { body = matches[0]; break; }
+                        }
+                    }
+                    if (body != null)
                     {
                         string composition = rigFolder + "/" + Path.GetFileNameWithoutExtension(info.file) + ".genshinclip";
                         string json = JsonUtility.ToJson(new Composition { name = info.name + "__WithBody",
-                            body = "../" + bodies[0].file, secondary = "../" + info.file }, true);
+                            body = "../" + body.file, secondary = "../" + info.file }, true);
                         if (!File.Exists(composition) || File.ReadAllText(composition) != json) File.WriteAllText(composition,json);
                         AssetDatabase.ImportAsset(composition,ImportAssetOptions.ForceSynchronousImport);
                         clip = AssetDatabase.LoadAssetAtPath<AnimationClip>(composition);

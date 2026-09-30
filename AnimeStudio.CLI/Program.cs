@@ -13,10 +13,26 @@ namespace AnimeStudio.CLI
     {
         public static void Main(string[] args)
         {
-            if (args.Length > 0 && args[0] == "--genshin-character")
+            if (args.Length > 0 && args[0] is "--genshin-weapon-catalog" or "--genshin-weapon" or "--genshin-weapons")
+                Environment.ExitCode = GenshinWeaponCommand.Run(args);
+            else if (args.Length > 0 && args[0] == "--genshin-character")
                 Environment.ExitCode = GenshinCharacterCommand.Run(args);
             else if (args.Length > 0 && args[0] is "--genshin-model" or "--genshin-prefab" or "--genshin-assemble" or "--genshin-vfx")
                 Environment.ExitCode = GenshinModelCommand.Run(args);
+            else if (args.Length > 0 && args[0] == "--genshin-source-probe")
+                Environment.ExitCode = GenshinSourceProbeCommand.Run(args);
+            else if (args.Length > 0 && args[0] == "--genshin-map-query")
+                Environment.ExitCode = GenshinSourceProbeCommand.RunMapQuery(args);
+            else if (args.Length > 0 && args[0] == "--genshin-animation-index")
+                Environment.ExitCode = GenshinSourceProbeCommand.RunAnimationIndex(args);
+            else if (args.Length > 0 && args[0] == "--genshin-avatar-recipe")
+                Environment.ExitCode = GenshinSourceProbeCommand.RunAvatarRecipe(args);
+            else if (args.Length > 0 && args[0] == "--genshin-avatar-package")
+                Environment.ExitCode = GenshinSourceProbeCommand.RunAvatarPackage(args);
+            else if (args.Length > 0 && args[0] == "--genshin-map-paths")
+                Environment.ExitCode = GenshinSourceProbeCommand.RunMapPaths(args);
+            else if (args.Length > 0 && args[0] == "--genshin-hierarchy-components")
+                Environment.ExitCode = GenshinSourceProbeCommand.RunHierarchyComponents(args);
             else if (args.Length > 0 && args[0] is "--genshin-audio" or "--genshin-banks" or "--genshin-bank-ids" or "--genshin-event-graph")
                 Environment.ExitCode = GenshinAudioCommand.Run(args);
             else

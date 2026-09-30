@@ -120,13 +120,12 @@ namespace AnimeStudio
                 if (src.TryGetValue(binding.path, out string path))
                 {
                     dest[binding.path] = path;
-                    if (dest.Count == tosCount)
-                    {
-                        return true;
-                    }
                 }
             }
-            return false;
+            // The zero/root path is seeded before discovery, and many channels
+            // can share one transform path. Dictionary size is therefore not a
+            // completeness test; every requested path hash must actually exist.
+            return clip.m_ClipBindingConstant.genericBindings.All(binding => dest.ContainsKey(binding.path));
         }
         private static bool IsAnimationContainsClip(this AnimationClip clip, Animation animation)
         {

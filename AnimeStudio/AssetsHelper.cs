@@ -348,6 +348,18 @@ namespace AnimeStudio
             return true;
         }
 
+        // Source-qualified lookup for probes that need an object omitted by
+        // minimal asset maps (for example a referenced humanoid Avatar).
+        public static bool TryResolveCAB(string cab, out string source, out long offset)
+        {
+            source = null;
+            offset = -1;
+            if (!CABMap.TryGetValue(cab, out var entry)) return false;
+            source = Path.GetFullPath(Path.Combine(BaseFolder, entry.Path));
+            offset = entry.Offset;
+            return true;
+        }
+
         private static void ParseCABMap(BinaryReader reader)
         {
             BaseFolder = reader.ReadString();
@@ -428,6 +440,218 @@ namespace AnimeStudio
                 return result;
             }
             finally { assetsManager.Clear(); }
+        }
+
+        // Weapon discovery has its own cache. The character reference cache is not
+        // invalidated by changes here and intentionally does not index Equip_ roots.
+        // This scan records source identities only; it does not infer dependencies
+        // from nearby names or load controller graphs.
+        public static List<AssetEntry> IndexGenshinWeaponReferences(string[] files)
+            => IndexGenshinWeaponSource(files).Entries;
+
+        public sealed class GenshinWeaponSourceLink
+        {
+            public string Source { get; set; }
+            public long Offset { get; set; }
+            public string OwnerFile { get; set; }
+            public long OwnerPathID { get; set; }
+            public string TargetFile { get; set; }
+            public long TargetPathID { get; set; }
+            public string Kind { get; set; }
+        }
+
+        public sealed class GenshinWeaponSourceFile
+        {
+            public string Source { get; set; }
+            public long Offset { get; set; }
+            public string SerializedFile { get; set; }
+        }
+
+        public sealed class GenshinWeaponSourceScan
+        {
+            public List<AssetEntry> Entries { get; set; } = new();
+            public List<GenshinWeaponSourceLink> Links { get; set; } = new();
+            public List<GenshinWeaponSourceFile> Files { get; set; } = new();
+            public List<string> ParseErrors { get; set; } = new();
+            public List<string> SourceFailures { get; set; } = new();
+        }
+
+        public static GenshinWeaponSourceScan IndexGenshinWeaponSource(string[] files)
+        {
+            if (files == null || files.Length is < 1 or > 64) throw new ArgumentException("Index 1–64 source files at a time.", nameof(files));
+            var result = new GenshinWeaponSourceScan();
+            var game = GameManager.GetGameByType(GameType.GI);
+            assetsManager.Game = game;
+            try
+            {
+                ForEachLoadedBundle(files, file =>
+                {
+                    foreach (var serialized in assetsManager.assetsFileList)
+                    {
+                        result.Files.Add(new GenshinWeaponSourceFile { Source = Path.GetFullPath(file),
+                            Offset = serialized.offset, SerializedFile = serialized.fileName });
+                        var gameObjectNames = new Dictionary<long, string>();
+                        var gameObjects = new Dictionary<long, GameObject>();
+                        var animatorPointers = new List<(ObjectInfo Info, long GameObjectPathID)>();
+                        foreach (var info in serialized.m_Objects)
+                        {
+                            var type = (ClassIDType)info.classID;
+                            if (type is not (ClassIDType.GameObject or ClassIDType.Animator or ClassIDType.Mesh
+                                or ClassIDType.AnimationClip or ClassIDType.AnimatorController
+                                or ClassIDType.AnimatorOverrideController or ClassIDType.Avatar)) continue;
+                            try
+                            {
+                                var reader = new ObjectReader(serialized.reader, serialized, info, game);
+                                if (type == ClassIDType.Animator)
+                                {
+                                    // Component's Object base resets the shared stream and
+                                    // consumes any NoTarget header before this pointer.
+                                    var gameObject = new WeaponComponentReference(reader).m_GameObject;
+                                    if (gameObject.m_FileID == 0) animatorPointers.Add((info, gameObject.m_PathID));
+                                    continue;
+                                }
+                                GameObject objectValue = type == ClassIDType.GameObject ? new GameObject(reader) : null;
+                                string name = type == ClassIDType.GameObject
+                                    ? objectValue.Name : new ReferenceName(reader).Name;
+                                if (type == ClassIDType.GameObject)
+                                {
+                                    gameObjects[info.m_PathID] = objectValue;
+                                    if (!string.IsNullOrEmpty(name)) gameObjectNames[info.m_PathID] = name;
+                                }
+                                AddWeaponReference(file, serialized.offset, type, info.m_PathID, name, result.Entries);
+                            }
+                            catch (Exception error) when (error is IOException or ArgumentException or IndexOutOfRangeException)
+                            {
+                                result.ParseErrors.Add($"{file}|{serialized.offset}|{serialized.fileName}|{info.m_PathID}|{type}: {error.Message}");
+                            }
+                        }
+                        foreach (var animator in animatorPointers)
+                        {
+                            if (gameObjectNames.TryGetValue(animator.GameObjectPathID, out var name)
+                                && gameObjects.TryGetValue(animator.GameObjectPathID, out var owner)
+                                && owner.m_Components.Any(c => c.m_FileID == 0 && c.m_PathID == animator.Info.m_PathID))
+                                AddWeaponReference(file, serialized.offset, ClassIDType.Animator,
+                                    animator.Info.m_PathID, name, result.Entries);
+                        }
+                        if (gameObjectNames.Values.Any(IsWeaponModelName))
+                            AddWeaponTopology(file, serialized, gameObjects, result.Links, result.ParseErrors, game);
+                    }
+                }, mergeSplitAssets: false);
+                return result;
+            }
+            finally { assetsManager.Clear(); }
+        }
+
+        private static bool IsWeaponModelName(string name) =>
+            !string.IsNullOrEmpty(name) && !name.Contains("MonEquip", StringComparison.OrdinalIgnoreCase)
+            && (name.StartsWith("Equip_Sword_", StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith("Equip_Claymore_", StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith("Equip_Pole_", StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith("Equip_Bow_", StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith("Equip_Catalyst_", StringComparison.OrdinalIgnoreCase));
+
+        private static void AddWeaponTopology(string source, SerializedFile serialized,
+            Dictionary<long, GameObject> gameObjects, List<GenshinWeaponSourceLink> links,
+            List<string> parseErrors, Game game)
+        {
+            string ownerSource = Path.GetFullPath(source);
+            string TargetFile<T>(PPtr<T> pointer) where T : Object => pointer.m_FileID == 0
+                ? serialized.fileName : pointer.m_FileID > 0 && pointer.m_FileID <= serialized.m_Externals.Count
+                    ? serialized.m_Externals[pointer.m_FileID - 1].fileName : null;
+            void Add(long owner, string kind, string fileName, long pathID)
+            {
+                if (pathID == 0) return;
+                links.Add(new GenshinWeaponSourceLink { Source = ownerSource, Offset = serialized.offset,
+                    OwnerFile = serialized.fileName, OwnerPathID = owner, TargetFile = fileName,
+                    TargetPathID = pathID, Kind = kind });
+            }
+            var transformOwners = new Dictionary<long, long>();
+            foreach (var gameObject in gameObjects)
+            foreach (var component in gameObject.Value.m_Components)
+                if (component.m_FileID == 0) transformOwners.TryAdd(component.m_PathID, gameObject.Key);
+            bool Attached(long gameObjectPathID, long componentPathID) =>
+                gameObjects.TryGetValue(gameObjectPathID, out var owner)
+                && owner.m_Components.Any(c => c.m_FileID == 0 && c.m_PathID == componentPathID);
+            var parents = new List<(long ChildGO, string ParentFile, long ParentTransform)>();
+            foreach (var info in serialized.m_Objects)
+            {
+                var type = (ClassIDType)info.classID;
+                if (type is not (ClassIDType.Transform or ClassIDType.MeshFilter or ClassIDType.SkinnedMeshRenderer
+                    or ClassIDType.Animator)) continue;
+                try
+                {
+                    var reader = new ObjectReader(serialized.reader, serialized, info, game);
+                    switch (type)
+                    {
+                        case ClassIDType.Transform:
+                            var transform = new Transform(reader);
+                            if (transform.m_GameObject.m_FileID == 0
+                                && Attached(transform.m_GameObject.m_PathID, info.m_PathID))
+                                parents.Add((transform.m_GameObject.m_PathID, TargetFile(transform.m_Father), transform.m_Father.m_PathID));
+                            break;
+                        case ClassIDType.MeshFilter:
+                            var filter = new MeshFilter(reader);
+                            if (filter.m_GameObject.m_FileID == 0
+                                && Attached(filter.m_GameObject.m_PathID, info.m_PathID))
+                                Add(filter.m_GameObject.m_PathID, "mesh", TargetFile(filter.m_Mesh), filter.m_Mesh.m_PathID);
+                            break;
+                        case ClassIDType.SkinnedMeshRenderer:
+                            var skin = new SkinnedMeshRenderer(reader);
+                            if (skin.m_GameObject.m_FileID == 0
+                                && Attached(skin.m_GameObject.m_PathID, info.m_PathID))
+                                Add(skin.m_GameObject.m_PathID, "mesh", TargetFile(skin.m_Mesh), skin.m_Mesh.m_PathID);
+                            break;
+                        case ClassIDType.Animator:
+                            var animator = new WeaponComponentReference(reader);
+                            if (animator.m_GameObject.m_FileID == 0
+                                && Attached(animator.m_GameObject.m_PathID, info.m_PathID))
+                                Add(animator.m_GameObject.m_PathID, "animator", serialized.fileName, info.m_PathID);
+                            break;
+                    }
+                }
+                catch (Exception error) when (error is IOException or ArgumentException or IndexOutOfRangeException)
+                {
+                    parseErrors.Add($"{source}|{serialized.offset}|{serialized.fileName}|{info.m_PathID}|{type}: {error.Message}");
+                }
+            }
+            foreach (var parent in parents)
+                if (parent.ParentFile != null && parent.ParentFile.Equals(serialized.fileName, StringComparison.OrdinalIgnoreCase)
+                    && transformOwners.TryGetValue(parent.ParentTransform, out long parentGO))
+                    Add(parentGO, "child", serialized.fileName, parent.ChildGO);
+        }
+
+        private sealed class WeaponComponentReference : Component
+        {
+            public WeaponComponentReference(ObjectReader reader) : base(reader) { }
+        }
+
+        private static void AddWeaponReference(string file, long offset, ClassIDType type, long pathID,
+            string name, List<AssetEntry> result)
+        {
+            // Controller/clip/Avatar names are not reliable weapon selectors.
+            // Index all of them so qualified PPtr targets can be found later.
+            bool referenceTarget = type is ClassIDType.AnimationClip or ClassIDType.AnimatorController
+                or ClassIDType.AnimatorOverrideController or ClassIDType.Avatar;
+            if (referenceTarget)
+            {
+                result.Add(new AssetEntry { Source = Path.GetFullPath(file), Offset = offset,
+                    Type = type, PathID = pathID, Name = string.IsNullOrEmpty(name) ? $"{type} #{pathID}" : name,
+                    Container = "", Hash = "" });
+                return;
+            }
+            if (string.IsNullOrEmpty(name) || name.Contains("MonEquip", StringComparison.OrdinalIgnoreCase)) return;
+            bool weaponModel = name.StartsWith("Equip_Sword_", StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith("Equip_Claymore_", StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith("Equip_Pole_", StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith("Equip_Bow_", StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith("Equip_Catalyst_", StringComparison.OrdinalIgnoreCase);
+            bool animationCandidate = name.StartsWith("Ani_Equip_", StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith("Eff_Ani_Weapon_", StringComparison.OrdinalIgnoreCase);
+            bool effectCandidate = name.StartsWith("Eff_Weapon_", StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith("Eff_Ani_Weapon_", StringComparison.OrdinalIgnoreCase);
+            if (!weaponModel && !animationCandidate && !effectCandidate) return;
+            result.Add(new AssetEntry { Source = Path.GetFullPath(file), Offset = offset,
+                Type = type, PathID = pathID, Name = name, Container = "", Hash = "" });
         }
 
         private sealed class ReferenceName : NamedObject { public ReferenceName(ObjectReader reader) : base(reader) { } }

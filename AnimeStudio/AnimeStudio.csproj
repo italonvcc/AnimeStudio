@@ -31,7 +31,9 @@
 			<TargetPath>AnimeStudio.Ooz.dll</TargetPath>
 		</ContentWithTargetPath>
 		<ContentWithTargetPath Include="..\AnimeStudio.Libraries\AnimeStudio.FBXNative.dll">
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<!-- Native fixes must replace stale copies even if their timestamps are newer. -->
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+			<CopyToPublishDirectory>Always</CopyToPublishDirectory>
 			<TargetPath>AnimeStudio.FBXNative.dll</TargetPath>
 		</ContentWithTargetPath>
 	</ItemGroup>

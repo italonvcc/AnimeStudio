@@ -9,7 +9,7 @@ namespace AnimeStudio.GUI
 {
     partial class MainForm
     {
-        private ToolStripMenuItem myToolsMenu, characterExportButton;
+        private ToolStripMenuItem myToolsMenu, characterExportButton, weaponCatalogButton;
         private ToolStripMenuItem characterVoices, characterVfx, characterAnimations;
         private Task<GenshinCharacterReferences> characterReferences;
         private string characterMapPath;
@@ -23,6 +23,7 @@ namespace AnimeStudio.GUI
             {
                 myToolsMenu = new ToolStripMenuItem("My tools");
                 var character = new ToolStripMenuItem("Genshin character");
+                weaponCatalogButton = new ToolStripMenuItem("Genshin weapons (indexed sources)", null, OpenWeaponCatalog);
                 var mannequin = new ToolStripMenuItem("Genshin manequin");
                 ToolStripMenuItem Check(string text) => new(text) { CheckOnClick = true };
                 characterVoices = Check("Export Voice clips");
@@ -37,10 +38,12 @@ namespace AnimeStudio.GUI
                         if (e.CloseReason == ToolStripDropDownCloseReason.ItemClicked && menu.DropDown.GetItemAt(menu.DropDown.PointToClient(Cursor.Position)) is ToolStripMenuItem item && item.CheckOnClick) e.Cancel = true;
                     };
                 character.DropDownOpening += (_, _) => UpdateCharacterExportAvailability();
-                myToolsMenu.DropDownItems.AddRange(new ToolStripItem[] { character, mannequin });
+                myToolsMenu.DropDownItems.AddRange(new ToolStripItem[] { character, weaponCatalogButton, mannequin });
+                myToolsMenu.DropDownOpening += (_, _) => UpdateWeaponCatalogAvailability();
                 menuStrip1.Items.Insert(menuStrip1.Items.IndexOf(aboutToolStripMenuItem), myToolsMenu);
             }
             myToolsMenu.Enabled = Studio.Game.Type.IsGI();
+            UpdateWeaponCatalogAvailability();
         }
         internal async Task OnGenshinAssetMapLoaded(string path, IEnumerable<AssetEntry> entries)
         {
@@ -58,9 +61,13 @@ namespace AnimeStudio.GUI
                 CharacterProgress("Genshin references ready. Select one Animator, then My tools > Genshin character.");
             }
             catch (Exception e) { Logger.Error(e.ToString()); MessageBox.Show(this, e.Message, "Genshin reference refresh failed"); }
-            finally { EndOperation(); UpdateCharacterExportAvailability(); }
+            finally { EndOperation(); UpdateCharacterExportAvailability(); UpdateWeaponCatalogAvailability(); }
         }
-        internal void ClearGenshinReferences() { characterReferences = null; characterMapEntries = null; characterMapPath = null; }
+        internal void ClearGenshinReferences()
+        {
+            characterReferences = null; characterMapEntries = null; characterMapPath = null; weaponReferences = null;
+            UpdateWeaponCatalogAvailability();
+        }
         private void UpdateCharacterExportAvailability()
         {
             string reason = !Studio.Game.Type.IsGI() ? "Select Genshin Impact as the target game."

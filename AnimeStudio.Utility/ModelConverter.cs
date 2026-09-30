@@ -24,11 +24,12 @@ namespace AnimeStudio
         private Dictionary<Transform, ImportedFrame> transformDictionary = new Dictionary<Transform, ImportedFrame>();
         Dictionary<uint, string> morphChannelNames = new Dictionary<uint, string>();
 
-        public ModelConverter(GameObject m_GameObject, Options options, AnimationClip[] animationList = null)
+        public ModelConverter(GameObject m_GameObject, Options options, AnimationClip[] animationList = null,
+            bool ignoreRootAnimator = false)
         {
             this.options = options;
 
-            if (m_GameObject.m_Animator != null)
+            if (!ignoreRootAnimator && m_GameObject.m_Animator != null)
             {
                 InitWithAnimator(m_GameObject.m_Animator);
                 if (animationList == null && this.options.collectAnimations)
@@ -153,19 +154,23 @@ namespace AnimeStudio
 
         private void ConvertMeshRenderer(Transform m_Transform)
         {
+            if (options.includedTransforms != null && !options.includedTransforms.Contains(m_Transform)) return;
             m_Transform.m_GameObject.TryGet(out var m_GameObject);
 
-            if (m_GameObject.m_MeshRenderer != null)
+            if (m_GameObject.m_MeshRenderer != null &&
+                (options.includedRenderers == null || options.includedRenderers.Contains(m_GameObject.m_MeshRenderer)))
             {
                 ConvertMeshRenderer(m_GameObject.m_MeshRenderer);
             }
 
-            if (m_GameObject.m_SkinnedMeshRenderer != null)
+            if (m_GameObject.m_SkinnedMeshRenderer != null &&
+                (options.includedRenderers == null || options.includedRenderers.Contains(m_GameObject.m_SkinnedMeshRenderer)))
             {
                 ConvertMeshRenderer(m_GameObject.m_SkinnedMeshRenderer);
             }
 
-            if (m_GameObject.m_Animation != null)
+            if (m_GameObject.m_Animation != null &&
+                (options.includedAnimationTransforms == null || options.includedAnimationTransforms.Contains(m_Transform)))
             {
                 foreach (var animation in m_GameObject.m_Animation.m_Animations)
                 {
@@ -229,6 +234,7 @@ namespace AnimeStudio
             transformDictionary.Add(trans, frame);
             trans.m_GameObject.TryGet(out var m_GameObject);
             frame.Name = m_GameObject.m_Name;
+            frame.SourceGameObject = m_GameObject;
             SetFrame(frame, trans.m_LocalPosition, trans.m_LocalRotation, trans.m_LocalScale);
             return frame;
         }
@@ -250,6 +256,7 @@ namespace AnimeStudio
 
         private void ConvertTransforms(Transform trans, ImportedFrame parent)
         {
+            if (options.includedTransforms != null && !options.includedTransforms.Contains(trans)) return;
             var frame = ConvertTransform(trans);
             if (parent == null)
             {
@@ -272,6 +279,7 @@ namespace AnimeStudio
             if (mesh == null)
                 return;
             var iMesh = new ImportedMesh();
+            iMesh.SourceMesh = mesh;
             meshR.m_GameObject.TryGet(out var m_GameObject2);
             iMesh.Path = GetTransformPath(m_GameObject2.m_Transform);
             iMesh.SubmeshList = new List<ImportedSubmesh>();
@@ -331,6 +339,7 @@ namespace AnimeStudio
                 }
                 ImportedMaterial iMat = ConvertMaterial(mat);
                 iSubmesh.Material = iMat.Name;
+                iSubmesh.SourceMaterial = mat;
                 iSubmesh.BaseVertex = (int)mesh.m_SubMeshes[i].firstVertex;
 
                 //Face
@@ -662,6 +671,7 @@ namespace AnimeStudio
                 }
                 iMat = new ImportedMaterial();
                 iMat.Name = mat.m_Name;
+                iMat.SourceMaterial = mat;
                 //default values
                 iMat.Diffuse = new Color(0.8f, 0.8f, 0.8f, 1);
                 iMat.Ambient = new Color(0.2f, 0.2f, 0.2f, 1);
@@ -707,7 +717,9 @@ namespace AnimeStudio
 
                 //textures
                 iMat.Textures = new List<ImportedMaterialTexture>();
-                foreach (var texEnv in mat.m_SavedProperties.m_TexEnvs)
+                // A geometry-only export retains the source material/slot name
+                // but must not decode or write an unrequested texture payload.
+                if (options.exportMaterials) foreach (var texEnv in mat.m_SavedProperties.m_TexEnvs)
                 {
                     if (!texEnv.Value.m_Texture.TryGet<Texture2D>(out var m_Texture2D)) //TODO other Texture
                     {
@@ -783,6 +795,7 @@ namespace AnimeStudio
                 using (stream)
                 {
                     iTex = new ImportedTexture(stream, name);
+                    iTex.SourceTexture = m_Texture2D;
                     TextureList.Add(iTex);
                 }
             }
@@ -1086,6 +1099,7 @@ namespace AnimeStudio
 
         private void CreateBonePathHash(Transform m_Transform)
         {
+            if (options.includedTransforms != null && !options.includedTransforms.Contains(m_Transform)) return;
             var name = GetTransformPathByFather(m_Transform);
             var crc = new SevenZip.CRC();
             var bytes = Encoding.UTF8.GetBytes(name);
@@ -1189,6 +1203,12 @@ namespace AnimeStudio
             public HashSet<Material> materials;
             public Dictionary<string, (bool, int)> uvs;
             public Dictionary<string, int> texs; 
+            // Null keeps the original full-hierarchy conversion. Weapon rig
+            // closure supplies source Transform/Renderer identities to retain
+            // a detached sibling armature without exporting unrelated meshes.
+            public HashSet<Transform> includedTransforms;
+            public HashSet<Renderer> includedRenderers;
+            public HashSet<Transform> includedAnimationTransforms;
         }
     }
 }

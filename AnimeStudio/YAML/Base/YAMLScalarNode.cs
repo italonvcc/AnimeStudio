@@ -262,9 +262,9 @@ namespace AnimeStudio
 				case ScalarType.UInt64:
 					return emitter.Write(m_value);
 				case ScalarType.Single:
-					return emitter.Write(BitConverterExtensions.ToSingle((uint)m_value));
+					return emitter.Write(FormatUnityFloat(BitConverterExtensions.ToSingle((uint)m_value)));
 				case ScalarType.Double:
-					return emitter.Write(BitConverterExtensions.ToDouble(m_value));
+					return emitter.Write(FormatUnityDouble(BitConverterExtensions.ToDouble(m_value)));
 				case ScalarType.String:
 					return WriteString(emitter);
 
@@ -433,9 +433,9 @@ namespace AnimeStudio
 					case ScalarType.UInt64:
 						return m_value.ToString();
 					case ScalarType.Single:
-						return BitConverterExtensions.ToSingle((uint)m_value).ToString(CultureInfo.InvariantCulture);
+						return FormatUnityFloat(BitConverterExtensions.ToSingle((uint)m_value));
 					case ScalarType.Double:
-						return BitConverterExtensions.ToDouble(m_value).ToString(CultureInfo.InvariantCulture);
+						return FormatUnityDouble(BitConverterExtensions.ToDouble(m_value));
 					case ScalarType.String:
 						return m_string;
 
@@ -444,6 +444,23 @@ namespace AnimeStudio
 				}
 			}
 			set => m_string = value;
+		}
+		private static string FormatUnityFloat(float value)
+		{
+			// .NET's invariant culture can emit the Unicode infinity glyph; Unity YAML
+			// expects ASCII Infinity and otherwise imports the tangent as NaN.
+			if (float.IsPositiveInfinity(value)) return "Infinity";
+			if (float.IsNegativeInfinity(value)) return "-Infinity";
+			if (float.IsNaN(value)) return "NaN";
+			return value.ToString(CultureInfo.InvariantCulture);
+		}
+
+		private static string FormatUnityDouble(double value)
+		{
+			if (double.IsPositiveInfinity(value)) return "Infinity";
+			if (double.IsNegativeInfinity(value)) return "-Infinity";
+			if (double.IsNaN(value)) return "NaN";
+			return value.ToString(CultureInfo.InvariantCulture);
 		}
 		public ScalarStyle Style { get; }
 
