@@ -5,7 +5,7 @@ reads them belongs to `com.caladan.stylizedgamekit` (its `Editor/` import implem
 not to each export. New exports contain no generated `.cs` files or `Generic/Editor`
 folder. Legacy importer templates remain in the source tree for comparison, but
 are no longer embedded in the utility assembly or written to output.
-The package's [AnimeStudio import guide](https://github.com/italonvcc/com.caladan.StylizedGameKit/blob/main/Docs/AnimeStudio-Import.md)
+The package's [AnimeStudio import guide](https://github.com/italonvcc/Project_Caladan/blob/main/Packages/com.caladan.shaders/Docs/AnimeStudio-Import.md)
 owns current Unity setup and live validation; this page owns the exporter file
 contract and offline evidence.
 
