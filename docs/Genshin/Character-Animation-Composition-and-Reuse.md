@@ -8,7 +8,7 @@ intended to travel with characters being reused in another project.
 exports contain `anime-studio-import.json` and asset metadata, with no generated
 Unity Editor `.cs` files. Install `com.caladan.stylizedgamekit` in the receiving Unity
 project and follow the [descriptor contract](Unity-Import-Descriptor.md) and
-the package's [current import guide](https://github.com/italonvcc/com.caladan.StylizedGameKit/blob/main/Docs/AnimeStudio-Import.md).
+the package's [current import guide](https://github.com/italonvcc/Project_Caladan/blob/main/Packages/com.caladan.shaders/Docs/AnimeStudio-Import.md).
 This guide's generated-script layout, importer version fingerprints and
 source-file references below document the September 29 implementation. Apply
 its animation composition concepts to current exports, but use the package
