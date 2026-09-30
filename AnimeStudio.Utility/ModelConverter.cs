@@ -406,7 +406,9 @@ namespace AnimeStudio
                 //Tangent
                 if (iMesh.hasTangent)
                 {
-                    iVertex.Tangent = new Vector4(-mesh.m_Tangents[j * 4], mesh.m_Tangents[j * 4 + 1], mesh.m_Tangents[j * 4 + 2], mesh.m_Tangents[j * 4 + 3]);
+                    // Reflecting X changes the basis handedness as well as tangent X.
+                    // This preserves cross(normal, tangent) * w through the FBX round trip.
+                    iVertex.Tangent = new Vector4(-mesh.m_Tangents[j * 4], mesh.m_Tangents[j * 4 + 1], mesh.m_Tangents[j * 4 + 2], -mesh.m_Tangents[j * 4 + 3]);
                 }
                 //Colors
                 if (iMesh.hasColor)

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -23,6 +23,9 @@ namespace AnimeStudio
         public bool m_Enabled;
         public StaticBatchInfo m_StaticBatchInfo;
         public uint[] m_SubsetIndices;
+        // Genshin runtime subdivision enable flag. Preserve it for exporters;
+        // base mesh topology alone does not describe the final skinned geometry.
+        public byte m_UseTessellation;
         private bool isNewHeader = false;
 
         public static bool HasPrope(SerializedType type) => type.Match("F622BC5EE0E86D7BDF8C912DD94DCBF5") || type.Match("9255FA54269ADD294011FDA525B5FCAC");
@@ -91,7 +94,7 @@ namespace AnimeStudio
                             }
                             if (reader.Game.Type.IsGI())
                             {
-                                var m_UseTessellation = reader.ReadByte();
+                                m_UseTessellation = reader.ReadByte();
                                 var m_IsTerrainTessInfo = isNewHeader ? reader.ReadByte() : 0;
                                 var m_UseVertexLightInForward = isNewHeader ? reader.ReadByte() : 0;
                                 var m_CombineSubMeshInGeoPass = isNewHeader ? reader.ReadByte() : 0;

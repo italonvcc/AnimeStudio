@@ -77,9 +77,9 @@ namespace AnimeStudio
         public TextureFormat m_TextureFormat;
         public bool m_MipMap;
         public int m_MipCount;
+        public int m_ColorSpace = -1;
         public int m_ImageCount;
         public int m_TextureDimension;
-        public int m_ColorSpace;
         public GLTextureSettings m_TextureSettings;
         public ResourceReader image_data;
         public StreamingInfo m_StreamData;
